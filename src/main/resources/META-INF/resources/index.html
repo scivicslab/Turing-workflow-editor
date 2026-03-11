@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POJO-actor Workflow</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>POJO-actor Workflow</h1>
+        <div class="header-controls">
+            <input type="text" id="workflowName" placeholder="Workflow name" value="my-workflow">
+            <label for="maxIterations" style="color:var(--text-secondary);font-size:12px;white-space:nowrap;">Max iter:</label>
+            <input type="number" id="maxIterations" value="100" min="1" max="100000" style="width:70px;">
+            <button id="runBtn" class="btn btn-run">Run</button>
+            <button id="stopBtn" class="btn btn-stop" disabled>Stop</button>
+            <select id="themeSelect">
+                <option value="dark-catppuccin">Dark Catppuccin</option>
+                <option value="dark-nord">Dark Nord</option>
+                <option value="dark-blue">Dark Blue</option>
+                <option value="dark-green">Dark Green</option>
+                <option value="dark-red">Dark Red</option>
+                <option value="light-clean">Light Clean</option>
+                <option value="light-warm">Light Warm</option>
+                <option value="light-blue">Light Blue</option>
+                <option value="light-green">Light Green</option>
+                <option value="light-red">Light Red</option>
+            </select>
+        </div>
+    </header>
+    <main>
+        <section class="editor-section">
+            <div class="toolbar">
+                <button id="addRowBtn" class="btn btn-small">+ Transition</button>
+                <button id="addSubRowBtn" class="btn btn-small">&#x21B3; Sub-action</button>
+                <button id="actorsBtn" class="btn btn-small">Actors</button>
+                <button id="exportYamlBtn" class="btn btn-small">Export YAML</button>
+                <button id="importYamlBtn" class="btn btn-small">Import YAML</button>
+            </div>
+            <div class="table-wrapper">
+                <table id="workflowTable">
+                    <thead>
+                        <tr>
+                            <th class="col-num">#</th>
+                            <th class="col-state">from</th>
+                            <th class="col-state">to</th>
+                            <th class="col-actor">actor</th>
+                            <th class="col-method">method</th>
+                            <th class="col-args">arguments</th>
+                            <th class="col-actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <section class="log-section">
+            <div class="log-header">
+                <span>Execution Log</span>
+                <button id="clearLogBtn" class="btn btn-small">Clear</button>
+            </div>
+            <div id="logOutput" class="log-output"></div>
+        </section>
+    </main>
+    <div id="actorPanel" class="actor-panel" style="display:none;">
+        <div class="actor-panel-header">
+            <span>Registered Actors</span>
+            <button id="actorPanelClose" class="btn btn-small">&times;</button>
+        </div>
+        <div id="actorPanelBody" class="actor-panel-body"></div>
+    </div>
+    <textarea id="yamlImportArea" style="display:none;"></textarea>
+    <script src="app.js"></script>
+</body>
+</html>
