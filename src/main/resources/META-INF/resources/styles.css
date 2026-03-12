@@ -303,6 +303,88 @@ main {
     min-height: 0;
 }
 
+/* Tab bar */
+.tab-bar {
+    display: flex;
+    align-items: stretch;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0 12px;
+    gap: 0;
+    overflow-x: auto;
+    min-height: 34px;
+}
+
+.tab-list {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+}
+
+.tab-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+    user-select: none;
+}
+
+.tab-item:hover {
+    color: var(--text-primary);
+    background: var(--row-hover);
+}
+
+.tab-item.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+}
+
+.tab-item .tab-name {
+    cursor: pointer;
+}
+
+.tab-item .tab-name:focus {
+    outline: 1px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 2px;
+}
+
+.tab-item .tab-close {
+    font-size: 14px;
+    line-height: 1;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: 0 2px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.tab-item:hover .tab-close {
+    opacity: 1;
+}
+
+.tab-item .tab-close:hover {
+    color: var(--accent-red);
+    background: var(--bg-tertiary);
+}
+
+.tab-add-btn {
+    align-self: center;
+    margin-left: 4px;
+    font-size: 14px;
+    padding: 2px 8px;
+}
+
 .toolbar {
     padding: 8px 20px;
     display: flex;
@@ -345,7 +427,7 @@ th {
 .col-state { width: 70px; }
 .col-actor { width: 100px; }
 .col-method { width: 100px; }
-.col-args { width: auto; min-width: 300px; }
+.col-args { width: auto; min-width: 600px; }
 .col-actions { width: 70px; text-align: center; }
 
 td {
@@ -425,11 +507,23 @@ td input.col-to {
     color: var(--accent-red);
 }
 
+/* Log resizer */
+.log-resizer {
+    height: 5px;
+    background: var(--border-color);
+    cursor: ns-resize;
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+
+.log-resizer:hover, .log-resizer.dragging {
+    background: var(--accent-blue);
+}
+
 /* Log section */
 .log-section {
     height: 200px;
-    min-height: 100px;
-    border-top: 2px solid var(--border-color);
+    min-height: 60px;
     display: flex;
     flex-direction: column;
     background: var(--bg-secondary);
@@ -447,6 +541,29 @@ td input.col-to {
     letter-spacing: 0.5px;
     border-bottom: 1px solid var(--border-color);
 }
+
+.log-header-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+#logLevelSelect {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+#logLevelSelect:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.log-entry.filtered { display: none; }
 
 .log-output {
     flex: 1;
@@ -603,4 +720,285 @@ tr.drag-over td {
 .actor-child-name {
     font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     color: var(--accent-yellow);
+}
+
+/* Description section */
+.description-section {
+    padding: 6px 20px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.description-section textarea {
+    width: 100%;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 24px;
+}
+
+.description-section textarea:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+/* Step group */
+.step-group {
+    margin: 6px 0;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bg-secondary);
+}
+
+.step-group.dragging {
+    opacity: 0.4;
+}
+
+.step-group.drag-over {
+    border-color: var(--accent-blue);
+    border-width: 2px;
+}
+
+/* Step header */
+.step-header {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 5px 0;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    min-height: 34px;
+}
+
+.step-num {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    width: 30px;
+    min-width: 30px;
+    text-align: center;
+    font-weight: 600;
+    padding: 0 3px;
+}
+
+.step-states {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 262px;
+    min-width: 262px;
+    padding: 0 3px;
+}
+
+.step-from, .step-to {
+    width: 110px;
+    text-align: center;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-size: 13px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+
+.step-from:focus, .step-to:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.step-arrow {
+    color: var(--accent-blue);
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.step-label {
+    width: 268px;
+    min-width: 268px;
+    background: var(--input-bg);
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-style: italic;
+    resize: none;
+    overflow: hidden;
+    min-height: 24px;
+    height: 24px;
+    line-height: 1.4;
+    font-family: inherit;
+    margin: 0 3px 0 6px;
+}
+
+.step-label:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    color: var(--text-primary);
+}
+
+.step-label::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.5;
+}
+
+.step-note-input {
+    flex: 1;
+    min-width: 100px;
+    background: var(--input-bg);
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    resize: none;
+    overflow: hidden;
+    min-height: 24px;
+    height: 24px;
+    line-height: 1.4;
+    font-family: inherit;
+    margin: 0 6px 0 6px;
+}
+
+.step-note-input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    color: var(--text-primary);
+}
+
+.step-note-input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.5;
+}
+
+.step-actions-bar {
+    width: 180px;
+    min-width: 180px;
+    display: flex;
+    gap: 2px;
+    justify-content: center;
+    padding: 0 3px;
+}
+
+.step-actions-bar button {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.step-actions-bar button:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.step-actions-bar button.delete-step-btn:hover {
+    color: var(--accent-red);
+}
+
+/* Action table within step */
+.action-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.action-table th {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 4px 6px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.action-table .col-act-num { width: 30px; text-align: center; }
+.action-table .col-act-actor { width: 268px; }
+.action-table .col-act-method { width: 268px; }
+.action-table .col-act-args { /* auto: fills remaining width to align with note right edge */ }
+.action-table .col-act-actions { width: 180px; text-align: center; }
+
+.action-table td {
+    padding: 1px 3px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+}
+
+.action-table td.act-num {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.action-table tr:hover td {
+    background: var(--row-hover);
+}
+
+.action-table td input,
+.action-table td textarea {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-primary);
+    padding: 3px 6px;
+    font-size: 13px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    border-radius: 3px;
+}
+
+.action-table td input:focus,
+.action-table td textarea:focus {
+    background: var(--input-bg);
+    border-color: var(--accent-blue);
+    outline: none;
+}
+
+.action-table td textarea.col-act-args {
+    resize: vertical;
+    min-height: 24px;
+    height: 24px;
+    overflow: hidden;
+    line-height: 1.4;
+}
+
+.act-row-actions {
+    display: flex;
+    gap: 2px;
+    justify-content: center;
+}
+
+.act-row-actions button {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 1px 3px;
+    border-radius: 3px;
+    line-height: 1;
+}
+
+.act-row-actions button:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.act-row-actions button.act-delete-btn:hover {
+    color: var(--accent-red);
 }

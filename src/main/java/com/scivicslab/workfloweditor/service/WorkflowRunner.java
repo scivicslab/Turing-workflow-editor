@@ -35,6 +35,7 @@ public class WorkflowRunner {
     private IIActorSystem system;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile boolean stopRequested = false;
+    private volatile Interpreter currentInterpreter = null;
 
     @PostConstruct
     void init() {
@@ -54,6 +55,10 @@ public class WorkflowRunner {
 
     public void stop() {
         stopRequested = true;
+        Interpreter interp = currentInterpreter;
+        if (interp != null) {
+            interp.requestStop();
+        }
     }
 
     /**
@@ -109,27 +114,56 @@ public class WorkflowRunner {
     /**
      * Runs a workflow from matrix rows.
      */
-    public void run(String name, List<MatrixRow> rows, int maxIterations, Consumer<WorkflowEvent> emitter) {
+    public void run(String name, List<MatrixRow> rows, int maxIterations, Level logLevel, Consumer<WorkflowEvent> emitter) {
         if (!running.compareAndSet(false, true)) {
             emitter.accept(new WorkflowEvent("error", "Workflow already running", null, null));
             return;
         }
         stopRequested = false;
 
+        // Set log level for workflow logger
+        var workflowLogger = java.util.logging.Logger.getLogger("workflow");
+        var prevLevel = workflowLogger.getLevel();
+        if (logLevel != null) {
+            workflowLogger.setLevel(logLevel);
+        }
+
+        // When OFF, filter out step/info events; pass output/completed/error/stopped
+        final Consumer<WorkflowEvent> effectiveEmitter;
+        if (logLevel == Level.OFF) {
+            effectiveEmitter = event -> {
+                String type = event.type();
+                if (!"step".equals(type) && !"info".equals(type)) {
+                    emitter.accept(event);
+                }
+            };
+        } else {
+            effectiveEmitter = emitter;
+        }
+
         // Wire output listeners so actor output streams to SSE
         Consumer<String> outputForwarder = msg ->
-                emitter.accept(new WorkflowEvent("output", msg, null, null));
+                effectiveEmitter.accept(new WorkflowEvent("output", msg, null, null));
         setOutputListeners(outputForwarder);
+
+        // Intercept stdout/stderr during execution
+        var origOut = System.out;
+        var origErr = System.err;
+        System.setOut(new java.io.PrintStream(new OutputInterceptor(origOut, line ->
+                effectiveEmitter.accept(new WorkflowEvent("output", line, null, null))), true));
+        System.setErr(new java.io.PrintStream(new OutputInterceptor(origErr, line ->
+                effectiveEmitter.accept(new WorkflowEvent("output", "[stderr] " + line, null, null))), true));
 
         try {
             String yaml = toYaml(name != null ? name : "workflow", rows);
             logger.info("Generated YAML:\n" + yaml);
-            emitter.accept(new WorkflowEvent("info", "Workflow started: " + (name != null ? name : "workflow"), null, null));
+            effectiveEmitter.accept(new WorkflowEvent("info", "Workflow started: " + (name != null ? name : "workflow"), null, null));
 
             Interpreter interpreter = new Interpreter.Builder()
                     .loggerName("workflow")
                     .team(system)
                     .build();
+            currentInterpreter = interpreter;
 
             interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
 
@@ -140,36 +174,96 @@ public class WorkflowRunner {
 
                 if (result == null || !result.isSuccess()) {
                     if ("end".equals(currentState)) {
-                        emitter.accept(new WorkflowEvent("completed", "Workflow completed", currentState, null));
+                        effectiveEmitter.accept(new WorkflowEvent("completed", "Workflow completed", currentState, null));
+                    } else if (interpreter.isStopRequested()) {
+                        effectiveEmitter.accept(new WorkflowEvent("stopped", "Workflow stopped by user", currentState, null));
                     } else {
                         String msg = result != null ? result.getResult() : "No matching transition from state: " + currentState;
-                        emitter.accept(new WorkflowEvent("error", msg, currentState, null));
+                        effectiveEmitter.accept(new WorkflowEvent("error", msg, currentState, null));
                     }
                     break;
                 }
 
-                emitter.accept(new WorkflowEvent("step", result.getResult(), currentState, null));
+                effectiveEmitter.accept(new WorkflowEvent("step", result.getResult(), currentState, null));
                 iteration++;
 
                 if ("end".equals(interpreter.getCurrentState())) {
-                    emitter.accept(new WorkflowEvent("completed", "Workflow completed", "end", null));
+                    effectiveEmitter.accept(new WorkflowEvent("completed", "Workflow completed", "end", null));
                     break;
                 }
             }
 
             if (iteration >= maxIterations) {
-                emitter.accept(new WorkflowEvent("error", "Max iterations reached (" + maxIterations + ")", null, null));
+                effectiveEmitter.accept(new WorkflowEvent("error", "Max iterations reached (" + maxIterations + ")", null, null));
             }
-            if (stopRequested) {
-                emitter.accept(new WorkflowEvent("stopped", "Workflow stopped by user", null, null));
+            if (stopRequested && !interpreter.isStopRequested()) {
+                effectiveEmitter.accept(new WorkflowEvent("stopped", "Workflow stopped by user", null, null));
             }
 
         } catch (Exception e) {
             logger.log(Level.WARNING, "Workflow execution failed", e);
-            emitter.accept(new WorkflowEvent("error", "Execution failed: " + e.getMessage(), null, null));
+            effectiveEmitter.accept(new WorkflowEvent("error", "Execution failed: " + e.getMessage(), null, null));
         } finally {
+            currentInterpreter = null;
+            System.setOut(origOut);
+            System.setErr(origErr);
             setOutputListeners(null);
+            workflowLogger.setLevel(prevLevel);
             running.set(false);
+        }
+    }
+
+    /**
+     * OutputStream that intercepts line-by-line output and forwards to a callback,
+     * while also writing to the original stream.
+     */
+    private static class OutputInterceptor extends java.io.OutputStream {
+        private final java.io.OutputStream original;
+        private final Consumer<String> lineCallback;
+        private final StringBuilder buffer = new StringBuilder();
+
+        OutputInterceptor(java.io.OutputStream original, Consumer<String> lineCallback) {
+            this.original = original;
+            this.lineCallback = lineCallback;
+        }
+
+        @Override
+        public void write(int b) throws java.io.IOException {
+            original.write(b);
+            if (b == '\n') {
+                String line = buffer.toString();
+                buffer.setLength(0);
+                if (!line.isEmpty()) {
+                    lineCallback.accept(line);
+                }
+            } else {
+                buffer.append((char) b);
+            }
+        }
+
+        @Override
+        public void write(byte[] buf, int off, int len) throws java.io.IOException {
+            original.write(buf, off, len);
+            for (int i = off; i < off + len; i++) {
+                if (buf[i] == '\n') {
+                    String line = buffer.toString();
+                    buffer.setLength(0);
+                    if (!line.isEmpty()) {
+                        lineCallback.accept(line);
+                    }
+                } else {
+                    buffer.append((char) buf[i]);
+                }
+            }
+        }
+
+        @Override
+        public void flush() throws java.io.IOException {
+            original.flush();
+            if (buffer.length() > 0) {
+                lineCallback.accept(buffer.toString());
+                buffer.setLength(0);
+            }
         }
     }
 
@@ -187,6 +281,13 @@ public class WorkflowRunner {
                 emitter.accept(new WorkflowEvent("output", msg, null, null));
         setOutputListeners(outputForwarder);
 
+        var origOut = System.out;
+        var origErr = System.err;
+        System.setOut(new java.io.PrintStream(new OutputInterceptor(origOut, line ->
+                emitter.accept(new WorkflowEvent("output", line, null, null))), true));
+        System.setErr(new java.io.PrintStream(new OutputInterceptor(origErr, line ->
+                emitter.accept(new WorkflowEvent("output", "[stderr] " + line, null, null))), true));
+
         try {
             logger.info("Running YAML directly:\n" + yaml);
             emitter.accept(new WorkflowEvent("info", "Workflow started (YAML)", null, null));
@@ -195,6 +296,7 @@ public class WorkflowRunner {
                     .loggerName("workflow")
                     .team(system)
                     .build();
+            currentInterpreter = interpreter;
 
             interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
 
@@ -206,6 +308,8 @@ public class WorkflowRunner {
                 if (result == null || !result.isSuccess()) {
                     if ("end".equals(currentState)) {
                         emitter.accept(new WorkflowEvent("completed", "Workflow completed", currentState, null));
+                    } else if (interpreter.isStopRequested()) {
+                        emitter.accept(new WorkflowEvent("stopped", "Workflow stopped by user", currentState, null));
                     } else {
                         String msg = result != null ? result.getResult() : "No matching transition from state: " + currentState;
                         emitter.accept(new WorkflowEvent("error", msg, currentState, null));
@@ -233,6 +337,9 @@ public class WorkflowRunner {
             logger.log(Level.WARNING, "Workflow execution failed", e);
             emitter.accept(new WorkflowEvent("error", "Execution failed: " + e.getMessage(), null, null));
         } finally {
+            currentInterpreter = null;
+            System.setOut(origOut);
+            System.setErr(origErr);
             setOutputListeners(null);
             running.set(false);
         }
@@ -305,7 +412,7 @@ public class WorkflowRunner {
     }
 
     /**
-     * Parses POJO-actor YAML back into a workflow name and matrix rows.
+     * Parses POJO-actor YAML back into structured steps with description/label/note.
      */
     @SuppressWarnings("unchecked")
     public static ParsedWorkflow fromYaml(String yaml) {
@@ -313,38 +420,125 @@ public class WorkflowRunner {
         Map<String, Object> doc = snakeYaml.load(yaml);
 
         String name = doc.containsKey("name") ? String.valueOf(doc.get("name")) : "workflow";
-        List<MatrixRow> rows = new ArrayList<>();
+        String description = doc.containsKey("description") ? String.valueOf(doc.get("description")) : null;
+        List<StepDto> stepDtos = new ArrayList<>();
 
         List<Map<String, Object>> steps = (List<Map<String, Object>>) doc.get("steps");
-        if (steps == null) return new ParsedWorkflow(name, rows);
+        if (steps == null) return new ParsedWorkflow(name, description, stepDtos);
 
         for (Map<String, Object> step : steps) {
             List<String> states = ((List<?>) step.get("states")).stream()
                     .map(String::valueOf).toList();
             String from = states.size() > 0 ? states.get(0) : "";
             String to = states.size() > 1 ? states.get(1) : "";
+            String label = step.containsKey("label") ? String.valueOf(step.get("label")) : null;
+            String note = step.containsKey("note") ? String.valueOf(step.get("note")) : null;
 
+            List<ActionDto> actionDtos = new ArrayList<>();
             List<Map<String, Object>> actions = (List<Map<String, Object>>) step.get("actions");
-            if (actions == null) continue;
+            if (actions != null) {
+                for (Map<String, Object> action : actions) {
+                    String actor = String.valueOf(action.getOrDefault("actor", ""));
+                    String method = String.valueOf(action.getOrDefault("method", ""));
+                    String args = action.containsKey("arguments")
+                            ? String.valueOf(action.get("arguments")) : null;
+                    actionDtos.add(new ActionDto(actor, method, args));
+                }
+            }
 
-            boolean first = true;
-            for (Map<String, Object> action : actions) {
-                String actor = String.valueOf(action.getOrDefault("actor", ""));
-                String method = String.valueOf(action.getOrDefault("method", ""));
-                String args = action.containsKey("arguments")
-                        ? String.valueOf(action.get("arguments")) : "";
+            stepDtos.add(new StepDto(from, to, label, note, actionDtos));
+        }
 
-                if (first) {
-                    rows.add(new MatrixRow(from, to, actor, method, args));
-                    first = false;
-                } else {
-                    rows.add(new MatrixRow("", "", actor, method, args));
+        return new ParsedWorkflow(name, description, stepDtos);
+    }
+
+    /**
+     * Converts structured steps to YAML including description/label/note.
+     */
+    public static String toYamlStructured(String name, String description, List<StepDto> steps) {
+        var sb = new StringBuilder();
+        sb.append("name: ").append(yamlEscape(name)).append("\n");
+        if (description != null && !description.isEmpty()) {
+            sb.append("description: ").append(yamlEscape(description)).append("\n");
+        }
+        sb.append("steps:\n");
+
+        for (var step : steps) {
+            sb.append("- states: [\"").append(escapeYamlString(step.from()))
+              .append("\", \"").append(escapeYamlString(step.to())).append("\"]\n");
+            if (step.label() != null && !step.label().isEmpty()) {
+                sb.append("  label: ").append(yamlEscape(step.label())).append("\n");
+            }
+            if (step.note() != null && !step.note().isEmpty()) {
+                sb.append("  note: ").append(yamlEscape(step.note())).append("\n");
+            }
+            sb.append("  actions:\n");
+            for (var action : step.actions()) {
+                sb.append("    - actor: ").append(yamlEscape(action.actor())).append("\n");
+                sb.append("      method: ").append(yamlEscape(action.method())).append("\n");
+                if (action.arguments() != null && !action.arguments().isEmpty()) {
+                    String args = action.arguments();
+                    if (args.startsWith("[") || args.startsWith("{")) {
+                        sb.append("      arguments: ").append(args).append("\n");
+                    } else {
+                        sb.append("      arguments: \"").append(escapeYamlString(args)).append("\"\n");
+                    }
                 }
             }
         }
 
-        return new ParsedWorkflow(name, rows);
+        return sb.toString();
     }
 
-    public record ParsedWorkflow(String name, List<MatrixRow> rows) {}
+    /**
+     * Converts structured steps to flat MatrixRow list for backward compatibility.
+     */
+    public static List<MatrixRow> stepsToRows(List<StepDto> steps) {
+        List<MatrixRow> rows = new ArrayList<>();
+        for (var step : steps) {
+            boolean first = true;
+            for (var action : step.actions()) {
+                if (first) {
+                    rows.add(new MatrixRow(step.from(), step.to(), action.actor(), action.method(), action.arguments()));
+                    first = false;
+                } else {
+                    rows.add(new MatrixRow("", "", action.actor(), action.method(), action.arguments()));
+                }
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * Converts flat MatrixRow list to structured steps (loses label/note).
+     */
+    public static List<StepDto> rowsToSteps(List<MatrixRow> rows) {
+        List<StepDto> steps = new ArrayList<>();
+        String curFrom = null, curTo = null;
+        List<ActionDto> curActions = null;
+
+        for (var row : rows) {
+            boolean isNew = row.from() != null && !row.from().isEmpty()
+                    && row.to() != null && !row.to().isEmpty();
+            if (isNew) {
+                if (curFrom != null && curActions != null) {
+                    steps.add(new StepDto(curFrom, curTo, null, null, curActions));
+                }
+                curFrom = row.from();
+                curTo = row.to();
+                curActions = new ArrayList<>();
+            }
+            if (curActions != null) {
+                curActions.add(new ActionDto(row.actor(), row.method(), row.arguments()));
+            }
+        }
+        if (curFrom != null && curActions != null) {
+            steps.add(new StepDto(curFrom, curTo, null, null, curActions));
+        }
+        return steps;
+    }
+
+    public record ParsedWorkflow(String name, String description, List<StepDto> steps) {}
+    public record StepDto(String from, String to, String label, String note, List<ActionDto> actions) {}
+    public record ActionDto(String actor, String method, String arguments) {}
 }

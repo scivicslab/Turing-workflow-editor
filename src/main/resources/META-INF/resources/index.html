@@ -10,9 +10,9 @@
     <header>
         <h1>POJO-actor Workflow</h1>
         <div class="header-controls">
-            <input type="text" id="workflowName" placeholder="Workflow name" value="my-workflow">
             <label for="maxIterations" style="color:var(--text-secondary);font-size:12px;white-space:nowrap;">Max iter:</label>
-            <input type="number" id="maxIterations" value="100" min="1" max="100000" style="width:70px;">
+            <input type="number" id="maxIterations" value="100" min="1" max="999999999" style="width:110px;">
+            <label style="color:var(--text-secondary);font-size:12px;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="infiniteCheck"> ∞</label>
             <button id="runBtn" class="btn btn-run">Run</button>
             <button id="stopBtn" class="btn btn-stop" disabled>Stop</button>
             <select id="themeSelect">
@@ -31,35 +31,40 @@
     </header>
     <main>
         <section class="editor-section">
+            <div class="tab-bar">
+                <div id="tabList" class="tab-list"></div>
+                <button id="addTabBtn" class="btn btn-small tab-add-btn" title="New workflow tab">+</button>
+            </div>
             <div class="toolbar">
-                <button id="addRowBtn" class="btn btn-small">+ Transition</button>
-                <button id="addSubRowBtn" class="btn btn-small">&#x21B3; Sub-action</button>
+                <button id="addStepBtn" class="btn btn-small">+ Step</button>
                 <button id="actorsBtn" class="btn btn-small">Actors</button>
                 <button id="exportYamlBtn" class="btn btn-small">Export YAML</button>
                 <button id="importYamlBtn" class="btn btn-small">Import YAML</button>
             </div>
+            <div class="description-section">
+                <textarea id="workflowDescription" placeholder="Workflow description (optional)" rows="1"></textarea>
+            </div>
             <div class="table-wrapper">
-                <table id="workflowTable">
-                    <thead>
-                        <tr>
-                            <th class="col-num">#</th>
-                            <th class="col-state">from</th>
-                            <th class="col-state">to</th>
-                            <th class="col-actor">actor</th>
-                            <th class="col-method">method</th>
-                            <th class="col-args">arguments</th>
-                            <th class="col-actions"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="tableBody">
-                    </tbody>
-                </table>
+                <div id="stepsContainer"></div>
             </div>
         </section>
+        <div id="logResizer" class="log-resizer"></div>
         <section class="log-section">
             <div class="log-header">
                 <span>Execution Log</span>
-                <button id="clearLogBtn" class="btn btn-small">Clear</button>
+                <div class="log-header-controls">
+                    <select id="logLevelSelect">
+                        <option value="INFO" selected>INFO</option>
+                        <option value="FINE">FINE</option>
+                        <option value="FINER">FINER</option>
+                        <option value="FINEST">FINEST</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="SEVERE">SEVERE</option>
+                        <option value="ALL">ALL</option>
+                        <option value="OFF">OFF</option>
+                    </select>
+                    <button id="clearLogBtn" class="btn btn-small">Clear</button>
+                </div>
             </div>
             <div id="logOutput" class="log-output"></div>
         </section>
@@ -71,7 +76,6 @@
         </div>
         <div id="actorPanelBody" class="actor-panel-body"></div>
     </div>
-    <textarea id="yamlImportArea" style="display:none;"></textarea>
     <script src="app.js"></script>
 </body>
 </html>

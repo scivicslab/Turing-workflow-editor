@@ -4,6 +4,7 @@ import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.workfloweditor.rest.WorkflowResource.MatrixRow;
 import com.scivicslab.workfloweditor.rest.WorkflowResource.WorkflowEvent;
 import com.scivicslab.workfloweditor.service.WorkflowRunner;
+import com.scivicslab.workfloweditor.service.WorkflowRunner.StepDto;
 import com.scivicslab.workfloweditor.service.WorkflowState;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -38,7 +39,13 @@ public class WorkflowApiResource {
     @Path("/workflow")
     @Produces(MediaType.APPLICATION_JSON)
     public WorkflowDto getWorkflow() {
-        return new WorkflowDto(state.getName(), state.getRows(), state.getMaxIterations());
+        var dto = new WorkflowDto();
+        dto.name = state.getName();
+        dto.description = state.getDescription();
+        dto.steps = WorkflowRunner.rowsToSteps(state.getRows());
+        dto.rows = state.getRows();
+        dto.maxIterations = state.getMaxIterations();
+        return dto;
     }
 
     @PUT
@@ -46,7 +53,15 @@ public class WorkflowApiResource {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, Object> putWorkflow(WorkflowDto dto) {
-        state.replaceAll(dto.name, dto.rows, dto.maxIterations != null ? dto.maxIterations : 100);
+        List<MatrixRow> rows = dto.rows;
+        if (rows == null && dto.steps != null) {
+            rows = WorkflowRunner.stepsToRows(dto.steps);
+        }
+        state.replaceAll(dto.name, rows, dto.maxIterations != null ? dto.maxIterations : 100);
+        if (dto.description != null) {
+            state.setDescription(dto.description);
+        }
+        notifyStateChanged("Workflow updated via API");
         return Map.of("status", "ok", "rowCount", state.size());
     }
 
@@ -94,7 +109,9 @@ public class WorkflowApiResource {
     @Path("/yaml/export")
     @Produces("text/plain")
     public String exportYaml() {
-        return WorkflowRunner.toYaml(state.getName(), state.getRows());
+        return WorkflowRunner.toYamlStructured(
+                state.getName(), state.getDescription(),
+                WorkflowRunner.rowsToSteps(state.getRows()));
     }
 
     @POST
@@ -103,8 +120,13 @@ public class WorkflowApiResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, Object> importYaml(String yaml) {
         WorkflowRunner.ParsedWorkflow parsed = WorkflowRunner.fromYaml(yaml);
-        state.replaceAll(parsed.name(), parsed.rows(), state.getMaxIterations());
-        return Map.of("status", "ok", "name", parsed.name(), "rowCount", parsed.rows().size());
+        List<MatrixRow> rows = WorkflowRunner.stepsToRows(parsed.steps());
+        state.replaceAll(parsed.name(), rows, state.getMaxIterations());
+        if (parsed.description() != null) {
+            state.setDescription(parsed.description());
+        }
+        notifyStateChanged("YAML imported: " + parsed.name());
+        return Map.of("status", "ok", "name", parsed.name(), "stepCount", parsed.steps().size());
     }
 
     // --- Direct YAML execution ---
@@ -119,9 +141,11 @@ public class WorkflowApiResource {
         }
 
         WorkflowRunner.ParsedWorkflow parsed = WorkflowRunner.fromYaml(yaml);
+        List<MatrixRow> rows = WorkflowRunner.stepsToRows(parsed.steps());
         int maxIter = maxIterations != null && maxIterations > 0 ? maxIterations : state.getMaxIterations();
-        state.replaceAll(parsed.name(), parsed.rows(), maxIter);
+        state.replaceAll(parsed.name(), rows, maxIter);
 
+        notifyStateChanged("YAML workflow started: " + parsed.name());
         var emitter = workflowResource.getSseEmitter();
         Thread.startVirtualThread(() -> runner.runYaml(yaml, maxIter, emitter));
         return Map.of("status", "started", "name", parsed.name());
@@ -190,6 +214,61 @@ public class WorkflowApiResource {
         }
     }
 
+    // --- Tabs (multiple workflows) ---
+
+    @GET
+    @Path("/tabs")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> listTabs() {
+        return Map.of("tabs", state.listTabs(), "active", state.getActiveTab() != null ? state.getActiveTab() : "");
+    }
+
+    @POST
+    @Path("/tabs")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> createTab(Map<String, String> body) {
+        String name = body != null ? body.get("name") : null;
+        String created = state.createTab(name != null ? name : "workflow");
+        return Map.of("status", "ok", "name", created);
+    }
+
+    @DELETE
+    @Path("/tabs/{name}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response deleteTab(@PathParam("name") String name) {
+        if (state.deleteTab(name)) {
+            return Response.ok(Map.of("status", "ok")).build();
+        }
+        return Response.status(404).entity(Map.of("status", "error", "message", "Tab not found: " + name)).build();
+    }
+
+    @PUT
+    @Path("/tabs/{name}/activate")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response activateTab(@PathParam("name") String name) {
+        if (state.activateTab(name)) {
+            return Response.ok(Map.of("status", "ok",
+                    "name", state.getName(),
+                    "rows", state.getRows(),
+                    "maxIterations", state.getMaxIterations())).build();
+        }
+        return Response.status(404).entity(Map.of("status", "error", "message", "Tab not found: " + name)).build();
+    }
+
+    @PUT
+    @Path("/tabs/{name}/rename")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response renameTab(@PathParam("name") String name, Map<String, String> body) {
+        String newName = body != null ? body.get("name") : null;
+        String result = state.renameTab(name, newName);
+        if (result != null) {
+            return Response.ok(Map.of("status", "ok", "name", result)).build();
+        }
+        return Response.status(404).entity(Map.of("status", "error", "message", "Tab not found: " + name)).build();
+    }
+
     // --- Loader shortcuts ---
 
     @POST
@@ -231,19 +310,22 @@ public class WorkflowApiResource {
         }
     }
 
+    // --- Helpers ---
+
+    private void notifyStateChanged(String message) {
+        var emitter = workflowResource.getSseEmitter();
+        emitter.accept(new WorkflowEvent("state-changed", message, null, null));
+    }
+
     // DTOs
 
     public static class WorkflowDto {
         public String name;
+        public String description;
+        public List<StepDto> steps;
         public List<MatrixRow> rows;
         public Integer maxIterations;
 
         public WorkflowDto() {}
-
-        public WorkflowDto(String name, List<MatrixRow> rows, int maxIterations) {
-            this.name = name;
-            this.rows = rows;
-            this.maxIterations = maxIterations;
-        }
     }
 }

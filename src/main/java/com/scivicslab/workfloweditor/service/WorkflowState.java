@@ -11,42 +11,157 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Server-side holder for the current workflow definition.
- * Enables external API clients to inspect and manipulate the workflow.
+ * Server-side holder for multiple workflow definitions (tabs).
+ * Enables external API clients to inspect and manipulate workflows.
  */
 @ApplicationScoped
 public class WorkflowState {
 
-    private volatile String name = "workflow";
-    private volatile int maxIterations = 100;
-    private final CopyOnWriteArrayList<MatrixRow> rows = new CopyOnWriteArrayList<>();
+    private final Map<String, TabData> tabs = new LinkedHashMap<>();
+    private volatile String activeTab = null;
 
-    public String getName() {
+    public static class TabData {
+        public final String name;
+        public final CopyOnWriteArrayList<MatrixRow> rows = new CopyOnWriteArrayList<>();
+        public volatile int maxIterations = 100;
+        public volatile String description = null;
+
+        public TabData(String name) {
+            this.name = name;
+        }
+    }
+
+    // --- Tab management ---
+
+    public synchronized List<String> listTabs() {
+        return new ArrayList<>(tabs.keySet());
+    }
+
+    public synchronized String getActiveTab() {
+        return activeTab;
+    }
+
+    public synchronized TabData getTab(String name) {
+        return tabs.get(name);
+    }
+
+    public synchronized String createTab(String name) {
+        if (name == null || name.isBlank()) name = "workflow";
+        // Ensure unique name
+        String baseName = name;
+        int counter = 1;
+        while (tabs.containsKey(name)) {
+            name = baseName + "-" + counter++;
+        }
+        tabs.put(name, new TabData(name));
+        if (activeTab == null) {
+            activeTab = name;
+        }
         return name;
     }
 
+    public synchronized boolean deleteTab(String name) {
+        if (!tabs.containsKey(name)) return false;
+        tabs.remove(name);
+        if (name.equals(activeTab)) {
+            activeTab = tabs.isEmpty() ? null : tabs.keySet().iterator().next();
+        }
+        return true;
+    }
+
+    public synchronized boolean activateTab(String name) {
+        if (!tabs.containsKey(name)) return false;
+        activeTab = name;
+        return true;
+    }
+
+    public synchronized String renameTab(String oldName, String newName) {
+        if (!tabs.containsKey(oldName)) return null;
+        if (newName == null || newName.isBlank()) return null;
+        if (tabs.containsKey(newName) && !oldName.equals(newName)) {
+            // Ensure unique
+            String base = newName;
+            int counter = 1;
+            while (tabs.containsKey(newName)) {
+                newName = base + "-" + counter++;
+            }
+        }
+        // Rebuild map to preserve order
+        Map<String, TabData> newTabs = new LinkedHashMap<>();
+        for (var entry : tabs.entrySet()) {
+            if (entry.getKey().equals(oldName)) {
+                var data = entry.getValue();
+                var renamed = new TabData(newName);
+                renamed.rows.addAll(data.rows);
+                renamed.maxIterations = data.maxIterations;
+                newTabs.put(newName, renamed);
+            } else {
+                newTabs.put(entry.getKey(), entry.getValue());
+            }
+        }
+        tabs.clear();
+        tabs.putAll(newTabs);
+        if (oldName.equals(activeTab)) {
+            activeTab = newName;
+        }
+        return newName;
+    }
+
+    // --- Active tab convenience (delegates to current active tab) ---
+
+    private TabData active() {
+        if (activeTab == null || !tabs.containsKey(activeTab)) {
+            // Auto-create default tab
+            createTab("workflow");
+        }
+        return tabs.get(activeTab);
+    }
+
+    public String getName() {
+        return active().name;
+    }
+
     public int getMaxIterations() {
-        return maxIterations;
+        return active().maxIterations;
+    }
+
+    public String getDescription() {
+        return active().description;
+    }
+
+    public void setDescription(String description) {
+        active().description = description;
     }
 
     public List<MatrixRow> getRows() {
-        return Collections.unmodifiableList(new ArrayList<>(rows));
+        return Collections.unmodifiableList(new ArrayList<>(active().rows));
     }
 
     public int size() {
-        return rows.size();
+        return active().rows.size();
     }
 
     public synchronized void replaceAll(String name, List<MatrixRow> newRows, int maxIterations) {
-        this.name = name != null ? name : "workflow";
-        this.maxIterations = maxIterations > 0 ? maxIterations : 100;
-        this.rows.clear();
-        if (newRows != null) {
-            this.rows.addAll(newRows);
+        String tabName = name != null ? name : "workflow";
+        // If a tab with this name exists, update it and activate it
+        if (tabs.containsKey(tabName)) {
+            var tab = tabs.get(tabName);
+            tab.rows.clear();
+            if (newRows != null) tab.rows.addAll(newRows);
+            tab.maxIterations = maxIterations > 0 ? maxIterations : 100;
+            activeTab = tabName;
+        } else {
+            // Create new tab
+            var tab = new TabData(tabName);
+            if (newRows != null) tab.rows.addAll(newRows);
+            tab.maxIterations = maxIterations > 0 ? maxIterations : 100;
+            tabs.put(tabName, tab);
+            activeTab = tabName;
         }
     }
 
     public synchronized int addStep(MatrixRow row, Integer index) {
+        var rows = active().rows;
         if (index != null) {
             if (index < 0 || index > rows.size()) {
                 throw new IndexOutOfBoundsException("Index " + index + " out of range [0, " + rows.size() + "]");
@@ -59,6 +174,7 @@ public class WorkflowState {
     }
 
     public synchronized void updateStep(int index, MatrixRow row) {
+        var rows = active().rows;
         if (index < 0 || index >= rows.size()) {
             throw new IndexOutOfBoundsException("Index " + index + " out of range [0, " + rows.size() + ")");
         }
@@ -66,6 +182,7 @@ public class WorkflowState {
     }
 
     public synchronized MatrixRow deleteStep(int index) {
+        var rows = active().rows;
         if (index < 0 || index >= rows.size()) {
             throw new IndexOutOfBoundsException("Index " + index + " out of range [0, " + rows.size() + ")");
         }
@@ -74,10 +191,8 @@ public class WorkflowState {
 
     // --- Transition / sub-action helpers ---
 
-    /**
-     * Returns structured view: list of transitions, each with from, to, and list of actions.
-     */
     public synchronized List<Map<String, Object>> getTransitions() {
+        var rows = active().rows;
         List<Map<String, Object>> transitions = new ArrayList<>();
         Map<String, Object> current = null;
         List<Map<String, String>> currentActions = null;
@@ -106,11 +221,8 @@ public class WorkflowState {
         return transitions;
     }
 
-    /**
-     * Returns the flat row index of the first row in transition tIndex.
-     * Throws IndexOutOfBoundsException if tIndex is invalid.
-     */
     private int transitionStartIndex(int tIndex) {
+        var rows = active().rows;
         int t = -1;
         for (int i = 0; i < rows.size(); i++) {
             var row = rows.get(i);
@@ -123,19 +235,16 @@ public class WorkflowState {
         throw new IndexOutOfBoundsException("Transition " + tIndex + " not found");
     }
 
-    /**
-     * Returns the flat row index corresponding to transition tIndex, action aIndex.
-     */
     private int actionFlatIndex(int tIndex, int aIndex) {
+        var rows = active().rows;
         int start = transitionStartIndex(tIndex);
-        // Count actions within this transition (start row + subsequent sub-action rows)
         int actionCount = 0;
         for (int i = start; i < rows.size(); i++) {
             if (i > start) {
                 var row = rows.get(i);
                 if (row.from() != null && !row.from().isEmpty()
                         && row.to() != null && !row.to().isEmpty()) {
-                    break; // next transition
+                    break;
                 }
             }
             if (actionCount == aIndex) return i;
@@ -145,10 +254,8 @@ public class WorkflowState {
                 "Action " + aIndex + " not found in transition " + tIndex + " (has " + actionCount + " actions)");
     }
 
-    /**
-     * Returns the flat index just after the last action of transition tIndex (insert point for appending).
-     */
     private int transitionEndIndex(int tIndex) {
+        var rows = active().rows;
         int start = transitionStartIndex(tIndex);
         int end = start + 1;
         for (int i = start + 1; i < rows.size(); i++) {
@@ -162,25 +269,11 @@ public class WorkflowState {
         return end;
     }
 
-    /**
-     * Adds a sub-action to transition tIndex. If aIndex is null, appends at end.
-     */
     public synchronized int addAction(int tIndex, MatrixRow action, Integer aIndex) {
+        var rows = active().rows;
         if (aIndex != null) {
-            int flatIdx = (aIndex == 0)
-                    ? transitionStartIndex(tIndex) + 1  // insert after transition row itself? No...
-                    : actionFlatIndex(tIndex, aIndex - 1) + 1;
-            // For aIndex=0 we want to insert right after the transition's first action (index 0 is the transition row)
-            // Actually: action index 0 = the transition row itself. Sub-actions start at index 1.
-            // But semantically the user wants to insert at a position within the actions list.
-            // Let's use: aIndex is within the actions list (0 = first action = transition row).
-            // Inserting a sub-action at aIndex means inserting *before* that position.
-            // But sub-actions always have empty from/to, so inserting at 0 would put it before the transition row — that's wrong.
-            // Better: only allow appending sub-actions (aIndex >= 1), or inserting after the transition row.
-            // Simplify: just compute flat index for insert.
             int insertAt;
             if (aIndex <= 0) {
-                // Insert right after the transition row (before first sub-action)
                 insertAt = transitionStartIndex(tIndex) + 1;
             } else {
                 insertAt = actionFlatIndex(tIndex, aIndex);
@@ -189,39 +282,30 @@ public class WorkflowState {
             rows.add(insertAt, subRow);
             return aIndex;
         }
-        // Append at end of transition
         int insertAt = transitionEndIndex(tIndex);
         var subRow = new MatrixRow("", "", action.actor(), action.method(), action.arguments());
         rows.add(insertAt, subRow);
-        // Return the action index within this transition
         return insertAt - transitionStartIndex(tIndex);
     }
 
-    /**
-     * Updates action aIndex within transition tIndex.
-     */
     public synchronized void updateAction(int tIndex, int aIndex, MatrixRow action) {
+        var rows = active().rows;
         int flatIdx = actionFlatIndex(tIndex, aIndex);
         var existing = rows.get(flatIdx);
-        // Preserve from/to of the original row (transition row keeps its from/to, sub-actions keep empty)
         var updated = new MatrixRow(existing.from(), existing.to(), action.actor(), action.method(), action.arguments());
         rows.set(flatIdx, updated);
     }
 
-    /**
-     * Deletes action aIndex within transition tIndex.
-     * If aIndex == 0 (the transition row itself), removes the entire transition and its sub-actions.
-     */
     public synchronized MatrixRow deleteAction(int tIndex, int aIndex) {
+        var rows = active().rows;
         int flatIdx = actionFlatIndex(tIndex, aIndex);
         if (aIndex == 0) {
-            // Deleting the transition row: remove it and all its sub-actions
             int end = transitionEndIndex(tIndex);
             List<MatrixRow> removed = new ArrayList<>();
             for (int i = end - 1; i >= flatIdx; i--) {
                 removed.add(rows.remove(i));
             }
-            return removed.get(removed.size() - 1); // return the transition row
+            return removed.get(removed.size() - 1);
         }
         return rows.remove(flatIdx);
     }

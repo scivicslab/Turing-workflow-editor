@@ -17,6 +17,8 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
+import com.scivicslab.workfloweditor.service.WorkflowRunner.StepDto;
+
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -113,11 +115,17 @@ public class WorkflowResource {
         }
 
         int maxIter = request.maxIterations != null && request.maxIterations > 0 ? request.maxIterations : 100;
-        workflowState.replaceAll(request.name, request.rows, maxIter);
+        Level logLevel = parseLogLevel(request.logLevel);
+        List<MatrixRow> rows = request.rows;
+        if (rows == null && request.steps != null) {
+            rows = WorkflowRunner.stepsToRows(request.steps);
+        }
+        workflowState.replaceAll(request.name, rows, maxIter);
 
+        final List<MatrixRow> finalRows = rows;
         Thread.startVirtualThread(() -> {
             try {
-                runner.run(request.name, request.rows, maxIter, this::emitSse);
+                runner.run(request.name, finalRows, maxIter, logLevel, this::emitSse);
             } catch (Exception e) {
                 logger.log(Level.WARNING, "Workflow failed", e);
                 emitSse(new WorkflowEvent("error", e.getMessage(), null, null));
@@ -159,12 +167,37 @@ public class WorkflowResource {
         return this::emitSse;
     }
 
+    /**
+     * Sets the log level for the workflow logger.
+     */
+    @jakarta.ws.rs.PUT
+    @Path("/log-level")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, String> setLogLevel(Map<String, String> body) {
+        String levelStr = body != null ? body.get("level") : null;
+        Level level = parseLogLevel(levelStr);
+        java.util.logging.Logger.getLogger("workflow").setLevel(level);
+        return Map.of("status", "ok", "level", level.getName());
+    }
+
+    private static Level parseLogLevel(String levelStr) {
+        if (levelStr == null || levelStr.isEmpty()) return Level.INFO;
+        try {
+            return Level.parse(levelStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return Level.INFO;
+        }
+    }
+
     // DTOs
 
     public static class RunRequest {
         public String name;
         public List<MatrixRow> rows;
+        public List<StepDto> steps;
         public Integer maxIterations;
+        public String logLevel;
     }
 
     public record MatrixRow(String from, String to, String actor, String method, String arguments) {}

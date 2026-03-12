@@ -4,11 +4,15 @@ A Quarkus web UI for editing and executing [POJO-actor](https://github.com/scivi
 
 ## Features
 
-- **Visual state transition editor** — Drag-and-drop row reordering, sub-action support
-- **Real-time execution log** — Instant output via SSE (Server-Sent Events)
+- **Nested step-group editor** — Each step shows `from → to` states, `label`, `note`, and a sub-table of actions (actor, method, arguments)
+- **Workflow description** — Editable description field for the workflow
+- **Real-time execution log** — Instant output via SSE (Server-Sent Events) with configurable log levels (ALL / INFO / OFF)
+- **Stop control** — Stop running workflows via `Interpreter.requestStop()`
 - **Built-in actors** — `shell` (command execution), `log` (logging), `loader` (dynamic JAR loading)
 - **REST API** — External workflow manipulation (CRUD, YAML import/export, run/stop)
 - **Dynamic actor loading** — Load actors from JARs at runtime via `DynamicActorLoaderActor`
+- **localStorage persistence** — Browser state survives across server restarts and page reloads
+- **YAML import/export** — Server-side SnakeYAML parsing with full support for `description`, `label`, `note`
 - **10 themes** — 5 dark + 5 light, persisted in `localStorage`
 
 ## Build & Run
@@ -28,8 +32,8 @@ Starts on port 8091 by default (configurable in `application.properties`).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/workflow` | Get current workflow |
-| `PUT` | `/api/workflow` | Replace entire workflow |
+| `GET` | `/api/workflow` | Get current workflow (returns both `steps` and `rows`) |
+| `PUT` | `/api/workflow` | Replace entire workflow (accepts `steps` or `rows`) |
 | `POST` | `/api/workflow/steps?index=N` | Add a step (`index` omitted = append) |
 | `PUT` | `/api/workflow/steps/{index}` | Update a step |
 | `DELETE` | `/api/workflow/steps/{index}` | Delete a step |
@@ -47,7 +51,7 @@ Starts on port 8091 by default (configurable in `application.properties`).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/yaml/export` | Export as YAML |
+| `GET` | `/api/yaml/export` | Export as YAML (with `description`, `label`, `note`) |
 | `POST` | `/api/yaml/import` | Import YAML (`Content-Type: text/plain`) |
 
 ### Execution Control

@@ -1,17 +1,25 @@
 (function () {
     'use strict';
 
-    var tableBody = document.getElementById('tableBody');
-    var workflowName = document.getElementById('workflowName');
+    var stepsContainer = document.getElementById('stepsContainer');
+    var descriptionArea = document.getElementById('workflowDescription');
     var runBtn = document.getElementById('runBtn');
     var stopBtn = document.getElementById('stopBtn');
-    var addRowBtn = document.getElementById('addRowBtn');
-    var addSubRowBtn = document.getElementById('addSubRowBtn');
+    var addStepBtn = document.getElementById('addStepBtn');
     var exportYamlBtn = document.getElementById('exportYamlBtn');
     var importYamlBtn = document.getElementById('importYamlBtn');
     var clearLogBtn = document.getElementById('clearLogBtn');
     var logOutput = document.getElementById('logOutput');
     var maxIterationsInput = document.getElementById('maxIterations');
+    var infiniteCheck = document.getElementById('infiniteCheck');
+
+    infiniteCheck.addEventListener('change', function () {
+        maxIterationsInput.disabled = infiniteCheck.checked;
+    });
+
+    function getMaxIterations() {
+        return infiniteCheck.checked ? 2147483647 : (parseInt(maxIterationsInput.value, 10) || 100);
+    }
 
     var actorsBtn = document.getElementById('actorsBtn');
     var actorPanel = document.getElementById('actorPanel');
@@ -19,10 +27,70 @@
     var actorPanelBody = document.getElementById('actorPanelBody');
     var themeSelect = document.getElementById('themeSelect');
 
+    var tabList = document.getElementById('tabList');
+    var addTabBtn = document.getElementById('addTabBtn');
+    var logResizer = document.getElementById('logResizer');
+    var logSection = document.querySelector('.log-section');
+    var logLevelSelect = document.getElementById('logLevelSelect');
+
     var sessionId = 'session-' + Date.now();
     var eventSource = null;
     var isRunning = false;
-    var dragRow = null;
+    var dragStep = null;
+
+    var activeTabName = null;
+    var tabCache = {};
+
+    // --- Local Storage persistence ---
+    var STORAGE_KEY = 'workflow-editor-state';
+
+    function saveToLocalStorage() {
+        var state = {
+            activeTab: activeTabName,
+            tabs: tabCache,
+            logLevel: logLevelSelect.value
+        };
+        if (activeTabName) {
+            state.tabs[activeTabName] = {
+                description: descriptionArea.value || null,
+                steps: getSteps(),
+                maxIterations: parseInt(maxIterationsInput.value, 10) || 100
+            };
+        }
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (e) {}
+    }
+
+    function loadFromLocalStorage() {
+        try {
+            var json = localStorage.getItem(STORAGE_KEY);
+            if (!json) return false;
+            var state = JSON.parse(json);
+            if (!state || !state.activeTab) return false;
+
+            tabCache = state.tabs || {};
+            activeTabName = state.activeTab;
+
+            var tabNames = Object.keys(tabCache);
+            if (tabNames.length > 0) {
+                renderTabs(tabNames, activeTabName);
+            }
+
+            var tabData = tabCache[activeTabName];
+            if (tabData) {
+                loadFromSteps(activeTabName, tabData.description, tabData.steps, tabData.maxIterations);
+            }
+
+            if (state.logLevel) {
+                logLevelSelect.value = state.logLevel;
+            }
+
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
 
     // --- Theme ---
     var THEME_KEY = 'workflow-editor-theme';
@@ -39,9 +107,7 @@
     // --- SSE Connection ---
 
     function connectSSE() {
-        if (eventSource) {
-            eventSource.close();
-        }
+        if (eventSource) eventSource.close();
         eventSource = new EventSource('/api/events?session=' + encodeURIComponent(sessionId));
 
         eventSource.onmessage = function (e) {
@@ -49,17 +115,17 @@
                 var event = JSON.parse(e.data);
                 appendLog(event.type, event.message);
 
+                if (event.type === 'state-changed') {
+                    loadFromServer();
+                    return;
+                }
                 if (event.type === 'completed' || event.type === 'error' || event.type === 'stopped') {
                     setRunning(false);
                 }
-            } catch (err) {
-                // ignore parse errors (heartbeat etc.)
-            }
+            } catch (err) {}
         };
 
-        eventSource.onerror = function () {
-            // auto-reconnect is built into EventSource
-        };
+        eventSource.onerror = function () {};
     }
 
     // --- Log ---
@@ -81,238 +147,472 @@
         logOutput.innerHTML = '';
     });
 
-    // --- Table Editing ---
-
-    // isSubAction: true means this row is a sub-action (no from/to, indented)
-    function createRow(from, to, actor, method, args, isSubAction) {
-        var tr = document.createElement('tr');
-        tr.draggable = true;
-        tr.dataset.subaction = isSubAction ? 'true' : 'false';
-
-        if (isSubAction) {
-            tr.className = 'sub-action-row';
-            tr.innerHTML =
-                '<td class="row-num"></td>' +
-                '<td class="sub-indicator" colspan="2"><span class="sub-arrow">&#x21B3;</span></td>' +
-                '<td><input class="col-actor" type="text" value="' + escapeAttr(actor || '') + '" placeholder="actor"></td>' +
-                '<td><input class="col-method" type="text" value="' + escapeAttr(method || '') + '" placeholder="method"></td>' +
-                '<td><textarea class="col-args" placeholder="arguments" rows="1">' + escapeAttr(args || '') + '</textarea></td>' +
-                '<td><div class="row-actions">' +
-                '<button class="drag-handle" title="Drag to reorder">&#x2630;</button>' +
-                '<button class="add-sub-btn" title="Add sub-action below">&#x21B3;</button>' +
-                '<button class="delete-btn" title="Delete row">&times;</button>' +
-                '</div></td>';
-        } else {
-            tr.innerHTML =
-                '<td class="row-num"></td>' +
-                '<td><input class="col-from" type="text" value="' + escapeAttr(from || '') + '" placeholder="0"></td>' +
-                '<td><input class="col-to" type="text" value="' + escapeAttr(to || '') + '" placeholder="1"></td>' +
-                '<td><input class="col-actor" type="text" value="' + escapeAttr(actor || '') + '" placeholder="actor"></td>' +
-                '<td><input class="col-method" type="text" value="' + escapeAttr(method || '') + '" placeholder="method"></td>' +
-                '<td><textarea class="col-args" placeholder="arguments" rows="1">' + escapeAttr(args || '') + '</textarea></td>' +
-                '<td><div class="row-actions">' +
-                '<button class="drag-handle" title="Drag to reorder">&#x2630;</button>' +
-                '<button class="insert-btn" title="Insert transition below">+</button>' +
-                '<button class="add-sub-btn" title="Add sub-action">&#x21B3;</button>' +
-                '<button class="delete-btn" title="Delete row">&times;</button>' +
-                '</div></td>';
-        }
-
-        // Auto-resize textarea
-        var argsArea = tr.querySelector('.col-args');
-        argsArea.addEventListener('input', function () { autoResize(this); });
-        autoResize(argsArea);
-
-        // Delete button
-        tr.querySelector('.delete-btn').addEventListener('click', function () {
-            // If deleting a transition row, also delete its sub-action rows
-            if (!isSubAction) {
-                var next = tr.nextElementSibling;
-                while (next && next.dataset.subaction === 'true') {
-                    var toRemove = next;
-                    next = next.nextElementSibling;
-                    toRemove.remove();
-                }
-            }
-            tr.remove();
-            renumberRows();
+    logLevelSelect.addEventListener('change', function () {
+        fetch('/api/log-level', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ level: logLevelSelect.value })
+        }).then(function (res) { return res.json(); })
+          .then(function (data) {
+            appendLog('info', 'Log level set to ' + data.level);
         });
+    });
 
-        // Insert transition button (only on transition rows)
-        var insertBtn = tr.querySelector('.insert-btn');
-        if (insertBtn) {
-            insertBtn.addEventListener('click', function () {
-                var nextFrom = tr.querySelector('.col-to').value;
-                // Find the last sub-action of this transition
-                var insertAfter = tr;
-                var next = tr.nextElementSibling;
-                while (next && next.dataset.subaction === 'true') {
-                    insertAfter = next;
-                    next = next.nextElementSibling;
-                }
-                var newRow = createRow(nextFrom, '', '', '', '', false);
-                insertAfter.parentNode.insertBefore(newRow, insertAfter.nextSibling);
-                renumberRows();
-                newRow.querySelector('.col-to').focus();
+    // --- Log Panel Resizer ---
+    (function () {
+        var startY, startHeight;
+        logResizer.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            startY = e.clientY;
+            startHeight = logSection.offsetHeight;
+            logResizer.classList.add('dragging');
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+        function onMouseMove(e) {
+            var delta = startY - e.clientY;
+            logSection.style.height = Math.max(60, startHeight + delta) + 'px';
+        }
+        function onMouseUp() {
+            logResizer.classList.remove('dragging');
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        }
+    })();
+
+    // --- Tab Management ---
+
+    function renderTabs(tabs, active) {
+        tabList.innerHTML = '';
+        tabs.forEach(function (name) {
+            var tab = document.createElement('div');
+            tab.className = 'tab-item' + (name === active ? ' active' : '');
+
+            var nameSpan = document.createElement('span');
+            nameSpan.className = 'tab-name';
+            nameSpan.textContent = name;
+            nameSpan.title = 'Double-click to rename';
+
+            nameSpan.addEventListener('click', function () {
+                if (name !== activeTabName) switchTab(name);
             });
+
+            nameSpan.addEventListener('dblclick', function () {
+                var newName = prompt('Rename tab:', name);
+                if (newName && newName !== name) renameTab(name, newName);
+            });
+
+            var closeBtn = document.createElement('button');
+            closeBtn.className = 'tab-close';
+            closeBtn.innerHTML = '&times;';
+            closeBtn.title = 'Close tab';
+            closeBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                if (confirm('Delete tab "' + name + '"?')) deleteTab(name);
+            });
+
+            tab.appendChild(nameSpan);
+            tab.appendChild(closeBtn);
+            tabList.appendChild(tab);
+        });
+        activeTabName = active;
+    }
+
+    function switchTab(name) {
+        saveCurrentTabToServer(function () {
+            fetch('/api/tabs/' + encodeURIComponent(name) + '/activate', {
+                method: 'PUT'
+            }).then(function (res) { return res.json(); })
+              .then(function (data) {
+                if (data.status === 'ok') {
+                    activeTabName = name;
+                    // data may have steps or rows
+                    if (data.steps) {
+                        loadFromSteps(data.name, data.description, data.steps, data.maxIterations);
+                    } else if (data.rows) {
+                        loadFromRows(data.name, data.rows, data.maxIterations);
+                    }
+                    refreshTabList();
+                }
+            });
+        });
+    }
+
+    function saveCurrentTabToServer(callback) {
+        if (!activeTabName) { if (callback) callback(); return; }
+        fetch('/api/workflow', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: activeTabName,
+                description: descriptionArea.value || null,
+                steps: getSteps(),
+                rows: getRows(),
+                maxIterations: getMaxIterations()
+            })
+        }).then(function () {
+            if (callback) callback();
+        }).catch(function () {
+            if (callback) callback();
+        });
+    }
+
+    function refreshTabList() {
+        fetch('/api/tabs').then(function (res) { return res.json(); })
+          .then(function (data) { renderTabs(data.tabs, data.active); });
+    }
+
+    function createNewTab(name) {
+        saveCurrentTabToServer(function () {
+            fetch('/api/tabs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name || 'workflow' })
+            }).then(function (res) { return res.json(); })
+              .then(function (data) {
+                if (data.status === 'ok') switchTab(data.name);
+            });
+        });
+    }
+
+    function deleteTab(name) {
+        fetch('/api/tabs/' + encodeURIComponent(name), { method: 'DELETE' })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.status === 'ok') {
+                delete tabCache[name];
+                loadFromServer();
+            }
+        });
+    }
+
+    function renameTab(oldName, newName) {
+        fetch('/api/tabs/' + encodeURIComponent(oldName) + '/rename', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName })
+        }).then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.status === 'ok') {
+                if (tabCache[oldName]) {
+                    tabCache[data.name] = tabCache[oldName];
+                    delete tabCache[oldName];
+                }
+                if (activeTabName === oldName) activeTabName = data.name;
+                refreshTabList();
+            }
+        });
+    }
+
+    addTabBtn.addEventListener('click', function () {
+        var name = prompt('New workflow name:', 'workflow');
+        if (name) createNewTab(name);
+    });
+
+    // --- Step Group Creation ---
+
+    function createStepGroup(from, to, label, note, actions) {
+        var group = document.createElement('div');
+        group.className = 'step-group';
+        group.draggable = true;
+
+        // Header
+        var header = document.createElement('div');
+        header.className = 'step-header';
+
+        var numSpan = document.createElement('span');
+        numSpan.className = 'step-num';
+        numSpan.textContent = '(1)';
+
+        var statesDiv = document.createElement('span');
+        statesDiv.className = 'step-states';
+
+        var fromInput = document.createElement('input');
+        fromInput.className = 'step-from';
+        fromInput.type = 'text';
+        fromInput.value = from || '';
+        fromInput.placeholder = '0';
+
+        var arrow = document.createElement('span');
+        arrow.className = 'step-arrow';
+        arrow.innerHTML = '&rarr;';
+
+        var toInput = document.createElement('input');
+        toInput.className = 'step-to';
+        toInput.type = 'text';
+        toInput.value = to || '';
+        toInput.placeholder = '1';
+
+        statesDiv.appendChild(fromInput);
+        statesDiv.appendChild(arrow);
+        statesDiv.appendChild(toInput);
+
+        var labelInput = document.createElement('textarea');
+        labelInput.className = 'step-label';
+        labelInput.rows = 1;
+        labelInput.value = label || '';
+        labelInput.placeholder = 'label';
+
+        var noteInput = document.createElement('textarea');
+        noteInput.className = 'step-note-input';
+        noteInput.rows = 1;
+        noteInput.value = note || '';
+        noteInput.placeholder = 'note';
+
+        var actionsBar = document.createElement('div');
+        actionsBar.className = 'step-actions-bar';
+
+        var dragHandle = document.createElement('button');
+        dragHandle.innerHTML = '&#x2630;';
+        dragHandle.title = 'Drag to reorder';
+        dragHandle.style.cursor = 'grab';
+
+        var addActionBtn = document.createElement('button');
+        addActionBtn.textContent = '+ Action';
+        addActionBtn.title = 'Add action';
+
+        var insertStepBtn = document.createElement('button');
+        insertStepBtn.textContent = '+ Step';
+        insertStepBtn.title = 'Insert step below';
+
+        var deleteStepBtn = document.createElement('button');
+        deleteStepBtn.className = 'delete-step-btn';
+        deleteStepBtn.innerHTML = '&times;';
+        deleteStepBtn.title = 'Delete step';
+
+        actionsBar.appendChild(dragHandle);
+        actionsBar.appendChild(addActionBtn);
+        actionsBar.appendChild(insertStepBtn);
+        actionsBar.appendChild(deleteStepBtn);
+
+        header.appendChild(numSpan);
+        header.appendChild(statesDiv);
+        header.appendChild(labelInput);
+        header.appendChild(noteInput);
+        header.appendChild(actionsBar);
+        group.appendChild(header);
+
+        // Action table
+        var table = document.createElement('table');
+        table.className = 'action-table';
+
+        var thead = document.createElement('thead');
+        thead.innerHTML =
+            '<tr>' +
+            '<th class="col-act-num">#</th>' +
+            '<th class="col-act-actor">actor</th>' +
+            '<th class="col-act-method">method</th>' +
+            '<th class="col-act-args">arguments</th>' +
+            '<th class="col-act-actions"></th>' +
+            '</tr>';
+        table.appendChild(thead);
+
+        var tbody = document.createElement('tbody');
+        table.appendChild(tbody);
+        group.appendChild(table);
+
+        // Add actions
+        if (actions && actions.length > 0) {
+            for (var i = 0; i < actions.length; i++) {
+                var a = actions[i];
+                tbody.appendChild(createActionRow(a.actor, a.method, a.arguments));
+            }
+        } else {
+            tbody.appendChild(createActionRow('', '', ''));
         }
 
-        // Add sub-action button
-        tr.querySelector('.add-sub-btn').addEventListener('click', function () {
-            // Find the last sub-action of this transition group
-            var insertAfter = tr;
-            if (!isSubAction) {
-                var next = tr.nextElementSibling;
-                while (next && next.dataset.subaction === 'true') {
-                    insertAfter = next;
-                    next = next.nextElementSibling;
-                }
-            }
-            var newRow = createRow('', '', '', '', '', true);
-            insertAfter.parentNode.insertBefore(newRow, insertAfter.nextSibling);
-            renumberRows();
-            newRow.querySelector('.col-actor').focus();
+        // Event: add action
+        addActionBtn.addEventListener('click', function () {
+            var row = createActionRow('', '', '');
+            tbody.appendChild(row);
+            renumberAll();
+            row.querySelector('.col-act-actor').focus();
+            saveToLocalStorage();
         });
 
-        // Drag and drop
-        tr.addEventListener('dragstart', function (e) {
-            dragRow = tr;
-            tr.classList.add('dragging');
+        // Event: insert step below
+        insertStepBtn.addEventListener('click', function () {
+            var nextFrom = toInput.value;
+            var newGroup = createStepGroup(nextFrom, '', '', '', null);
+            group.parentNode.insertBefore(newGroup, group.nextSibling);
+            renumberAll();
+            newGroup.querySelector('.step-to').focus();
+            saveToLocalStorage();
+        });
+
+        // Event: delete step
+        deleteStepBtn.addEventListener('click', function () {
+            if (stepsContainer.querySelectorAll('.step-group').length <= 1) {
+                appendLog('error', 'Cannot delete the last step');
+                return;
+            }
+            group.remove();
+            renumberAll();
+            saveToLocalStorage();
+        });
+
+        // Drag and drop for step groups
+        group.addEventListener('dragstart', function (e) {
+            dragStep = group;
+            group.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
         });
 
-        tr.addEventListener('dragend', function () {
-            tr.classList.remove('dragging');
-            dragRow = null;
-            document.querySelectorAll('.drag-over').forEach(function (el) {
-                el.classList.remove('drag-over');
-            });
-            renumberRows();
+        group.addEventListener('dragend', function () {
+            group.classList.remove('dragging');
+            dragStep = null;
+            var allGroups = stepsContainer.querySelectorAll('.step-group');
+            for (var i = 0; i < allGroups.length; i++) {
+                allGroups[i].classList.remove('drag-over');
+            }
+            renumberAll();
+            saveToLocalStorage();
         });
 
-        tr.addEventListener('dragover', function (e) {
+        group.addEventListener('dragover', function (e) {
             e.preventDefault();
-            if (dragRow && dragRow !== tr) {
-                tr.classList.add('drag-over');
+            if (dragStep && dragStep !== group) {
+                group.classList.add('drag-over');
             }
         });
 
-        tr.addEventListener('dragleave', function () {
-            tr.classList.remove('drag-over');
+        group.addEventListener('dragleave', function () {
+            group.classList.remove('drag-over');
         });
 
-        tr.addEventListener('drop', function (e) {
+        group.addEventListener('drop', function (e) {
             e.preventDefault();
-            tr.classList.remove('drag-over');
-            if (dragRow && dragRow !== tr) {
-                tableBody.insertBefore(dragRow, tr);
+            group.classList.remove('drag-over');
+            if (dragStep && dragStep !== group) {
+                stepsContainer.insertBefore(dragStep, group);
             }
         });
 
-        // Tab on last field (textarea) of last row adds a new transition
-        argsArea.addEventListener('keydown', function (e) {
-            if (e.key === 'Tab' && !e.shiftKey) {
-                var rows = tableBody.querySelectorAll('tr');
-                if (tr === rows[rows.length - 1]) {
-                    e.preventDefault();
-                    var lastTo = getLastTo();
-                    var nr = createRow(lastTo, '', '', '', '', false);
-                    tableBody.appendChild(nr);
-                    renumberRows();
-                    nr.querySelector('.col-to').focus();
-                }
+        // Auto-save on input changes
+        header.addEventListener('input', saveToLocalStorage);
+
+        renumberActions(tbody);
+
+        return group;
+    }
+
+    function createActionRow(actor, method, args) {
+        var tr = document.createElement('tr');
+
+        tr.innerHTML =
+            '<td class="act-num"></td>' +
+            '<td><input class="col-act-actor" type="text" value="' + escapeAttr(actor || '') + '" placeholder="actor"></td>' +
+            '<td><input class="col-act-method" type="text" value="' + escapeAttr(method || '') + '" placeholder="method"></td>' +
+            '<td><textarea class="col-act-args" placeholder="arguments" rows="1">' + escapeAttr(args || '') + '</textarea></td>' +
+            '<td><div class="act-row-actions">' +
+            '<button class="act-delete-btn" title="Delete action">&times;</button>' +
+            '</div></td>';
+
+        // Auto-resize textarea
+        var argsArea = tr.querySelector('.col-act-args');
+        argsArea.addEventListener('input', function () { autoResize(this); });
+        setTimeout(function () { autoResize(argsArea); }, 0);
+
+        // Delete action
+        tr.querySelector('.act-delete-btn').addEventListener('click', function () {
+            var tbody = tr.parentNode;
+            if (tbody.querySelectorAll('tr').length <= 1) {
+                appendLog('error', 'Cannot delete the last action in a step');
+                return;
             }
+            tr.remove();
+            renumberActions(tbody);
+            saveToLocalStorage();
         });
 
+        // Auto-save on input
+        tr.addEventListener('input', saveToLocalStorage);
+
         return tr;
     }
 
-    function getLastTo() {
-        var allRows = tableBody.querySelectorAll('tr:not(.sub-action-row)');
-        if (allRows.length > 0) {
-            var toInput = allRows[allRows.length - 1].querySelector('.col-to');
-            return toInput ? toInput.value : '';
+    function renumberAll() {
+        var groups = stepsContainer.querySelectorAll('.step-group');
+        for (var i = 0; i < groups.length; i++) {
+            groups[i].querySelector('.step-num').textContent = '(' + (i + 1) + ')';
+            renumberActions(groups[i].querySelector('.action-table tbody'));
         }
-        return '';
     }
 
-    function addRow(from, to, actor, method, args, isSubAction) {
-        var tr = createRow(from, to, actor, method, args, isSubAction || false);
-        tableBody.appendChild(tr);
-        renumberRows();
-        return tr;
-    }
-
-    function insertRowAfter(refRow, from, to, actor, method, args, isSubAction) {
-        var tr = createRow(from, to, actor, method, args, isSubAction || false);
-        refRow.parentNode.insertBefore(tr, refRow.nextSibling);
-        renumberRows();
-        return tr;
-    }
-
-    function renumberRows() {
-        var rows = tableBody.querySelectorAll('tr');
-        var transitionNum = 0;
+    function renumberActions(tbody) {
+        if (!tbody) return;
+        var rows = tbody.querySelectorAll('tr');
         for (var i = 0; i < rows.length; i++) {
-            var numCell = rows[i].querySelector('.row-num');
-            if (rows[i].dataset.subaction === 'true') {
-                numCell.textContent = '';
-            } else {
-                transitionNum++;
-                numCell.textContent = transitionNum;
-            }
+            var numCell = rows[i].querySelector('.act-num');
+            if (numCell) numCell.textContent = (i + 1);
         }
     }
 
-    addRowBtn.addEventListener('click', function () {
-        var lastTo = getLastTo();
-        var nr = addRow(lastTo, '', '', '', '', false);
-        nr.querySelector(lastTo ? '.col-to' : '.col-from').focus();
-    });
+    // --- Get structured steps from DOM ---
 
-    addSubRowBtn.addEventListener('click', function () {
-        // Add sub-action after the last row
-        var rows = tableBody.querySelectorAll('tr');
-        if (rows.length === 0) {
-            appendLog('error', 'Add a transition row first');
-            return;
-        }
-        var nr = addRow('', '', '', '', '', true);
-        nr.querySelector('.col-actor').focus();
-    });
-
-    // --- Get rows from table ---
-
-    function getRows() {
-        var rows = tableBody.querySelectorAll('tr');
-        var result = [];
-        var currentFrom = '';
-        var currentTo = '';
-
-        for (var i = 0; i < rows.length; i++) {
-            var tr = rows[i];
-            var isSub = tr.dataset.subaction === 'true';
-            var actor = tr.querySelector('.col-actor').value.trim();
-            var method = tr.querySelector('.col-method').value.trim();
-            var args = tr.querySelector('.col-args').value.trim();
-
-            if (!isSub) {
-                currentFrom = tr.querySelector('.col-from').value.trim();
-                currentTo = tr.querySelector('.col-to').value.trim();
-            }
-
-            if (actor && method && currentFrom && currentTo) {
-                result.push({
-                    from: isSub ? '' : currentFrom,
-                    to: isSub ? '' : currentTo,
+    function getSteps() {
+        var groups = stepsContainer.querySelectorAll('.step-group');
+        var steps = [];
+        for (var i = 0; i < groups.length; i++) {
+            var g = groups[i];
+            var step = {
+                from: g.querySelector('.step-from').value.trim(),
+                to: g.querySelector('.step-to').value.trim(),
+                label: g.querySelector('.step-label').value.trim() || null,
+                note: g.querySelector('.step-note-input').value.trim() || null,
+                actions: []
+            };
+            var actionRows = g.querySelectorAll('.action-table tbody tr');
+            for (var j = 0; j < actionRows.length; j++) {
+                var tr = actionRows[j];
+                var actor = tr.querySelector('.col-act-actor').value.trim();
+                var method = tr.querySelector('.col-act-method').value.trim();
+                var args = tr.querySelector('.col-act-args').value;
+                step.actions.push({
                     actor: actor,
                     method: method,
-                    arguments: args
+                    arguments: args || null
+                });
+            }
+            steps.push(step);
+        }
+        return steps;
+    }
+
+    // Flat rows for backward compat (used in run request)
+    function getRows() {
+        var steps = getSteps();
+        var rows = [];
+        for (var i = 0; i < steps.length; i++) {
+            var step = steps[i];
+            for (var j = 0; j < step.actions.length; j++) {
+                var a = step.actions[j];
+                rows.push({
+                    from: j === 0 ? step.from : '',
+                    to: j === 0 ? step.to : '',
+                    actor: a.actor,
+                    method: a.method,
+                    arguments: a.arguments
                 });
             }
         }
-        return result;
+        return rows;
     }
+
+    // --- Add Step ---
+
+    addStepBtn.addEventListener('click', function () {
+        var groups = stepsContainer.querySelectorAll('.step-group');
+        var lastTo = '';
+        if (groups.length > 0) {
+            lastTo = groups[groups.length - 1].querySelector('.step-to').value;
+        }
+        var newGroup = createStepGroup(lastTo, '', '', '', null);
+        stepsContainer.appendChild(newGroup);
+        renumberAll();
+        newGroup.querySelector('.step-to').focus();
+        saveToLocalStorage();
+    });
 
     // --- Run / Stop ---
 
@@ -330,15 +630,16 @@
         }
 
         setRunning(true);
-        appendLog('info', 'Starting workflow: ' + workflowName.value);
+        appendLog('info', 'Starting workflow: ' + (activeTabName || 'workflow'));
 
         fetch('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                name: workflowName.value,
+                name: activeTabName || 'workflow',
                 rows: rows,
-                maxIterations: parseInt(maxIterationsInput.value, 10) || 100
+                maxIterations: getMaxIterations(),
+                logLevel: logLevelSelect.value
             })
         }).then(function (res) {
             return res.json();
@@ -364,125 +665,151 @@
     // --- Export YAML ---
 
     exportYamlBtn.addEventListener('click', function () {
-        var rows = getRows();
-        var yaml = 'name: ' + workflowName.value + '\n';
+        var steps = getSteps();
+        var yaml = 'name: ' + (activeTabName || 'workflow') + '\n';
+        var desc = descriptionArea.value.trim();
+        if (desc) {
+            yaml += 'description: "' + desc.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"\n';
+        }
         yaml += 'steps:\n';
 
-        var inTransition = false;
-
-        for (var i = 0; i < rows.length; i++) {
-            var row = rows[i];
-            var isNew = row.from && row.to;
-
-            if (isNew) {
-                yaml += '  - states: ["' + row.from + '", "' + row.to + '"]\n';
-                yaml += '    actions:\n';
-                inTransition = true;
+        for (var i = 0; i < steps.length; i++) {
+            var step = steps[i];
+            yaml += '- states: ["' + step.from + '", "' + step.to + '"]\n';
+            if (step.label) {
+                yaml += '  label: ' + step.label + '\n';
             }
-
-            if (inTransition) {
-                yaml += '      - actor: ' + row.actor + '\n';
-                yaml += '        method: ' + row.method + '\n';
-                if (row.arguments) {
-                    var args = row.arguments.trim();
-                    if (args.startsWith('[') || args.startsWith('{')) {
-                        yaml += '        arguments: ' + args + '\n';
+            if (step.note) {
+                yaml += '  note: "' + step.note.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"\n';
+            }
+            yaml += '  actions:\n';
+            for (var j = 0; j < step.actions.length; j++) {
+                var a = step.actions[j];
+                yaml += '  - actor: ' + a.actor + '\n';
+                yaml += '    method: ' + a.method + '\n';
+                if (a.arguments) {
+                    var args = a.arguments;
+                    if (args.charAt(0) === '[' || args.charAt(0) === '{') {
+                        yaml += '    arguments: ' + args + '\n';
                     } else {
-                        yaml += '        arguments: "' + args.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"\n';
+                        yaml += '    arguments: "' + args.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"\n';
                     }
                 }
             }
         }
 
-        navigator.clipboard.writeText(yaml).then(function () {
-            appendLog('info', 'YAML copied to clipboard');
-        }).catch(function () {
-            prompt('YAML output:', yaml);
-        });
+        var blob = new Blob([yaml], { type: 'text/yaml' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = (activeTabName || 'workflow') + '.yaml';
+        a.click();
+        URL.revokeObjectURL(url);
+        appendLog('info', 'YAML exported to file: ' + a.download);
     });
 
     // --- Import YAML ---
 
     importYamlBtn.addEventListener('click', function () {
-        var yaml = prompt('Paste YAML here:');
-        if (!yaml) return;
-        parseAndLoadYaml(yaml);
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.yaml,.yml';
+        input.onchange = function () {
+            var file = input.files[0];
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function (e) {
+                parseAndLoadYaml(e.target.result);
+                appendLog('info', 'YAML imported from file: ' + file.name);
+            };
+            reader.readAsText(file);
+        };
+        input.click();
     });
 
     function parseAndLoadYaml(yaml) {
-        try {
-            tableBody.innerHTML = '';
-            var lines = yaml.split('\n');
-            var currentFrom = '';
-            var currentTo = '';
-            var firstActionInTransition = true;
-
-            for (var i = 0; i < lines.length; i++) {
-                var trimmed = lines[i].trim();
-
-                if (trimmed.startsWith('name:')) {
-                    workflowName.value = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
-                }
-
-                if (trimmed.startsWith('- states:')) {
-                    var match = trimmed.match(/\["?([^",\]]+)"?\s*,\s*"?([^",\]]+)"?\]/);
-                    if (match) {
-                        currentFrom = match[1];
-                        currentTo = match[2];
-                        firstActionInTransition = true;
-                    } else {
-                        // Multi-line format: - states:\n  - "0"\n  - "100"
-                        var stateValues = [];
-                        var j = i + 1;
-                        while (j < lines.length) {
-                            var stLine = lines[j].trim();
-                            if (stLine.startsWith('- ') && !stLine.startsWith('- states:') && !stLine.startsWith('- actor:')) {
-                                var val = stLine.substring(2).trim().replace(/^["']|["']$/g, '');
-                                if (val.indexOf(':') !== -1) break;
-                                stateValues.push(val);
-                                j++;
-                            } else {
-                                break;
-                            }
-                        }
-                        if (stateValues.length >= 2) {
-                            currentFrom = stateValues[0];
-                            currentTo = stateValues[1];
-                            firstActionInTransition = true;
-                            i = j - 1;
-                        }
-                    }
-                }
-
-                if (trimmed.startsWith('- actor:')) {
-                    var actor = trimmed.substring(8).trim().replace(/^["']|["']$/g, '');
-                    var method = '';
-                    var args = '';
-
-                    if (i + 1 < lines.length && lines[i + 1].trim().startsWith('method:')) {
-                        i++;
-                        method = lines[i].trim().substring(7).trim().replace(/^["']|["']$/g, '');
-                    }
-
-                    if (i + 1 < lines.length && lines[i + 1].trim().startsWith('arguments:')) {
-                        i++;
-                        args = lines[i].trim().substring(10).trim().replace(/^["']|["']$/g, '');
-                    }
-
-                    if (firstActionInTransition) {
-                        addRow(currentFrom, currentTo, actor, method, args, false);
-                        firstActionInTransition = false;
-                    } else {
-                        addRow('', '', actor, method, args, true);
-                    }
-                }
+        // Send to server for parsing (uses SnakeYAML)
+        fetch('/api/yaml/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: yaml
+        }).then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.status === 'ok') {
+                // Reload from server to get structured data
+                loadFromServer();
+            } else {
+                appendLog('error', 'Import failed: ' + (data.message || 'unknown error'));
             }
+        }).catch(function (err) {
+            appendLog('error', 'Import failed: ' + err.message);
+        });
+    }
 
-            appendLog('info', 'Imported ' + tableBody.querySelectorAll('tr').length + ' rows');
+    // --- Load data into UI ---
 
-        } catch (err) {
-            appendLog('error', 'Failed to parse YAML: ' + err.message);
+    function loadFromSteps(name, description, steps, maxIterations) {
+        stepsContainer.innerHTML = '';
+        activeTabName = name;
+        descriptionArea.value = description || '';
+        if (maxIterations) {
+            maxIterationsInput.value = maxIterations;
         }
+
+        if (steps && steps.length > 0) {
+            for (var i = 0; i < steps.length; i++) {
+                var s = steps[i];
+                var group = createStepGroup(s.from, s.to, s.label, s.note, s.actions);
+                stepsContainer.appendChild(group);
+            }
+        } else {
+            // Default steps
+            stepsContainer.appendChild(createStepGroup('0', '1', null, null,
+                [{ actor: 'log', method: 'info', arguments: 'Workflow started' }]));
+            stepsContainer.appendChild(createStepGroup('1', 'end', null, null,
+                [{ actor: 'log', method: 'info', arguments: 'Workflow finished' }]));
+        }
+        renumberAll();
+        saveToLocalStorage();
+    }
+
+    // Load from flat rows (backward compat)
+    function loadFromRows(name, rows, maxIterations) {
+        var steps = rowsToSteps(rows);
+        loadFromSteps(name, null, steps, maxIterations);
+    }
+
+    // Convert flat rows to steps (client-side)
+    function rowsToSteps(rows) {
+        if (!rows || rows.length === 0) return [];
+        var steps = [];
+        var curFrom = null, curTo = null;
+        var curActions = null;
+
+        for (var i = 0; i < rows.length; i++) {
+            var r = rows[i];
+            var isNew = r.from && r.from !== '' && r.to && r.to !== '';
+            if (isNew) {
+                if (curFrom !== null && curActions !== null) {
+                    steps.push({ from: curFrom, to: curTo, label: null, note: null, actions: curActions });
+                }
+                curFrom = r.from;
+                curTo = r.to;
+                curActions = [];
+            }
+            if (curActions !== null) {
+                curActions.push({ actor: r.actor, method: r.method, arguments: r.arguments });
+            }
+        }
+        if (curFrom !== null && curActions !== null) {
+            steps.push({ from: curFrom, to: curTo, label: null, note: null, actions: curActions });
+        }
+        return steps;
+    }
+
+    // Legacy alias
+    function loadTableFromData(name, rows, maxIterations) {
+        loadFromRows(name, rows, maxIterations);
     }
 
     // --- Utility ---
@@ -493,16 +820,14 @@
 
     function autoResize(el) {
         el.style.height = 'auto';
-        el.style.height = Math.max(28, el.scrollHeight) + 'px';
+        el.style.height = Math.max(24, el.scrollHeight) + 'px';
     }
 
     // --- Actor Panel ---
 
     actorsBtn.addEventListener('click', function () {
         actorPanel.style.display = actorPanel.style.display === 'none' ? 'flex' : 'none';
-        if (actorPanel.style.display === 'flex') {
-            loadActorTree();
-        }
+        if (actorPanel.style.display === 'flex') loadActorTree();
     });
 
     actorPanelClose.addEventListener('click', function () {
@@ -530,7 +855,6 @@
 
                 var body = '<div class="actor-card-body">';
 
-                // Actions
                 if (actor.actions && actor.actions.length > 0) {
                     body += '<div class="actor-section-label">Actions</div>';
                     body += '<div class="actor-actions-list">';
@@ -540,7 +864,6 @@
                     body += '</div>';
                 }
 
-                // Children
                 if (actor.children && actor.children.length > 0) {
                     body += '<div class="actor-section-label">Children</div>';
                     body += '<div class="actor-children-list">';
@@ -550,7 +873,6 @@
                     body += '</div>';
                 }
 
-                // Parent
                 if (actor.parent) {
                     body += '<div class="actor-section-label">Parent</div>';
                     body += '<div style="font-size:12px;color:var(--text-secondary)">' + escapeAttr(actor.parent) + '</div>';
@@ -569,41 +891,41 @@
     // --- Sync with server state ---
 
     function loadFromServer() {
-        fetch('/api/workflow').then(function (res) {
-            return res.json();
-        }).then(function (dto) {
-            if (dto.rows && dto.rows.length > 0) {
-                tableBody.innerHTML = '';
-                workflowName.value = dto.name || 'workflow';
-                if (dto.maxIterations) {
-                    maxIterationsInput.value = dto.maxIterations;
-                }
-                var currentFrom = '';
-                var currentTo = '';
-                for (var i = 0; i < dto.rows.length; i++) {
-                    var r = dto.rows[i];
-                    var isSub = (!r.from || r.from === '') && (!r.to || r.to === '');
-                    if (!isSub) {
-                        currentFrom = r.from;
-                        currentTo = r.to;
+        fetch('/api/tabs').then(function (res) { return res.json(); })
+          .then(function (tabData) {
+            if (tabData.tabs && tabData.tabs.length > 0) {
+                renderTabs(tabData.tabs, tabData.active);
+                return fetch('/api/workflow').then(function (res) { return res.json(); })
+                  .then(function (dto) {
+                    if (dto.steps) {
+                        loadFromSteps(dto.name, dto.description, dto.steps, dto.maxIterations);
+                    } else {
+                        loadFromRows(dto.name, dto.rows, dto.maxIterations);
                     }
-                    addRow(isSub ? '' : r.from, isSub ? '' : r.to,
-                           r.actor, r.method, r.arguments || '', isSub);
-                }
-                appendLog('info', 'Loaded workflow from server: ' + dto.name + ' (' + dto.rows.length + ' rows)');
+                });
             } else {
-                // No server state — show default
-                addRow('0', '1', 'log', 'info', 'Workflow started', false);
-                addRow('1', 'end', 'log', 'info', 'Workflow finished', false);
-                addRow('!end', 'end', 'log', 'warn', 'Unexpected state - terminating', false);
+                return fetch('/api/tabs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'workflow' })
+                }).then(function (res) { return res.json(); })
+                  .then(function (data) {
+                    activeTabName = data.name;
+                    loadFromSteps(data.name, null, null, 100);
+                    refreshTabList();
+                });
             }
         }).catch(function () {
-            // Server unavailable — show default
-            addRow('0', '1', 'log', 'info', 'Workflow started', false);
-            addRow('1', 'end', 'log', 'info', 'Workflow finished', false);
-            addRow('!end', 'end', 'log', 'warn', 'Unexpected state - terminating', false);
+            if (!loadFromLocalStorage()) {
+                activeTabName = 'workflow';
+                renderTabs(['workflow'], 'workflow');
+                loadFromSteps('workflow', null, null, 100);
+            }
         });
     }
+
+    // Auto-save on description changes
+    descriptionArea.addEventListener('input', saveToLocalStorage);
 
     // --- Initialize ---
 
