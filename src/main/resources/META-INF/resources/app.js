@@ -913,7 +913,13 @@
                     body += '<div class="actor-section-label">Actions</div>';
                     body += '<div class="actor-actions-list">';
                     actor.actions.forEach(function (action) {
-                        body += '<span class="actor-action-tag">' + escapeAttr(action) + '</span>';
+                        var actionName = typeof action === 'string' ? action : action.name;
+                        var javadocUrl = typeof action === 'object' ? action.javadocUrl : null;
+                        if (javadocUrl) {
+                            body += '<a class="actor-action-tag actor-action-link" href="' + escapeAttr(javadocUrl) + '" target="_blank" title="Open Javadoc">' + escapeAttr(actionName) + '</a>';
+                        } else {
+                            body += '<span class="actor-action-tag">' + escapeAttr(actionName) + '</span>';
+                        }
                     });
                     body += '</div>';
                 }

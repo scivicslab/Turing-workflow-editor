@@ -107,21 +107,55 @@ public class WorkflowRunner {
         }
     }
 
-    private List<String> discoverActions(IIActorRef<?> actor) {
-        List<String> actions = new ArrayList<>();
+    private List<Map<String, String>> discoverActions(IIActorRef<?> actor) {
+        List<Map<String, String>> actions = new ArrayList<>();
+        String javadocBaseUrl = resolveJavadocBaseUrl(actor.getClass());
+        String classPath = actor.getClass().getName().replace('.', '/');
+
         for (Method method : actor.getClass().getMethods()) {
             Action action = method.getAnnotation(Action.class);
             if (action != null) {
-                actions.add(action.value());
+                Map<String, String> entry = new LinkedHashMap<>();
+                entry.put("name", action.value());
+                if (javadocBaseUrl != null) {
+                    // Build javadoc URL: baseUrl/package/ClassName.html#methodName(params)
+                    String params = buildJavadocParams(method);
+                    entry.put("javadocUrl", javadocBaseUrl + "/" + classPath + ".html#" + method.getName() + "(" + params + ")");
+                }
+                actions.add(entry);
             }
         }
         // Built-in JSON state actions available on all IIActorRef
-        actions.add("putJson");
-        actions.add("getJson");
-        actions.add("hasJson");
-        actions.add("clearJson");
-        actions.add("printJson");
+        for (String name : List.of("putJson", "getJson", "hasJson", "clearJson", "printJson")) {
+            Map<String, String> entry = new LinkedHashMap<>();
+            entry.put("name", name);
+            actions.add(entry);
+        }
         return actions;
+    }
+
+    private String resolveJavadocBaseUrl(Class<?> clazz) {
+        try {
+            var url = clazz.getClassLoader().getResource("META-INF/javadoc.properties");
+            if (url == null) return null;
+            var props = new java.util.Properties();
+            try (var in = url.openStream()) {
+                props.load(in);
+            }
+            return props.getProperty("javadoc.baseUrl");
+        } catch (Exception e) {
+            logger.log(Level.FINE, "Could not load javadoc.properties for " + clazz.getName(), e);
+            return null;
+        }
+    }
+
+    private String buildJavadocParams(Method method) {
+        var sb = new StringBuilder();
+        for (int i = 0; i < method.getParameterTypes().length; i++) {
+            if (i > 0) sb.append(",");
+            sb.append(method.getParameterTypes()[i].getSimpleName());
+        }
+        return sb.toString();
     }
 
     /**
@@ -182,6 +216,13 @@ public class WorkflowRunner {
             interpreter.setBreakpointListener((transition, state) ->
                     effectiveEmitter.accept(new WorkflowEvent("paused",
                             "Breakpoint at state: " + state, state, null)));
+
+            interpreter.setActionFailureListener((transition, state, result) -> {
+                String failMsg = "Action failed at state '" + state + "' transition "
+                        + transition.getStates() + ": " + result.getResult();
+                logger.warning(failMsg);
+                effectiveEmitter.accept(new WorkflowEvent("error", failMsg, state, null));
+            });
 
             interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
 
@@ -340,12 +381,42 @@ public class WorkflowRunner {
                     effectiveEmitter.accept(new WorkflowEvent("paused",
                             "Breakpoint at state: " + state, state, null)));
 
+            interpreter.setActionFailureListener((transition, state, result) -> {
+                String failMsg = "Action failed at state '" + state + "' transition "
+                        + transition.getStates() + ": " + result.getResult();
+                logger.warning(failMsg);
+                effectiveEmitter.accept(new WorkflowEvent("error", failMsg, state, null));
+            });
+
             interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
+
+            // Debug: log initial state and loaded transitions to both server log and SSE
+            String initMsg = "Initial state: '" + interpreter.getCurrentState() + "'";
+            logger.info(initMsg);
+            effectiveEmitter.accept(new WorkflowEvent("info", initMsg, null, null));
+            if (interpreter.hasCodeLoaded()) {
+                var debugTransitions = interpreter.getCode().getTransitions();
+                effectiveEmitter.accept(new WorkflowEvent("info", "Transition count: " + debugTransitions.size(), null, null));
+                for (int t = 0; t < debugTransitions.size(); t++) {
+                    var tr = debugTransitions.get(t);
+                    String trMsg = "  [" + t + "] states=" + tr.getStates() + " label=" + tr.getLabel();
+                    logger.info(trMsg);
+                    effectiveEmitter.accept(new WorkflowEvent("info", trMsg, null, null));
+                }
+            } else {
+                effectiveEmitter.accept(new WorkflowEvent("error", "No code loaded!", null, null));
+            }
 
             int iteration = 0;
             while (iteration < maxIterations && !stopRequested) {
                 ActionResult result = interpreter.execCode();
                 String currentState = interpreter.getCurrentState();
+                // Debug: log each step result
+                String stepDebug = "execCode result: success=" + (result != null && result.isSuccess())
+                        + " state=" + currentState
+                        + " msg=" + (result != null ? result.getResult() : "null");
+                logger.info(stepDebug);
+                effectiveEmitter.accept(new WorkflowEvent("info", stepDebug, currentState, null));
 
                 if (result == null || !result.isSuccess()) {
                     if ("end".equals(currentState)) {
@@ -395,6 +466,21 @@ public class WorkflowRunner {
             } else if (actor instanceof LogActor log) {
                 log.setOutputListener(listener);
             }
+            // For dynamically loaded actors, try to call setOutputListener via reflection
+            trySetOutputListenerReflective(actor, listener);
+        }
+    }
+
+    private void trySetOutputListenerReflective(IIActorRef<?> actor, Consumer<String> listener) {
+        try {
+            var method = actor.getClass().getMethod("setOutputListener", Consumer.class);
+            // Skip built-in actors already handled above
+            if (actor instanceof ShellActor || actor instanceof LogActor) return;
+            method.invoke(actor, listener);
+        } catch (NoSuchMethodException e) {
+            // Actor doesn't support output listener — that's fine
+        } catch (Exception e) {
+            logger.log(Level.FINE, "Failed to set output listener on " + actor.getName(), e);
         }
     }
 
@@ -470,10 +556,17 @@ public class WorkflowRunner {
         if (steps == null) return new ParsedWorkflow(name, description, stepDtos);
 
         for (Map<String, Object> step : steps) {
-            List<String> states = ((List<?>) step.get("states")).stream()
-                    .map(String::valueOf).toList();
-            String from = states.size() > 0 ? states.get(0) : "";
-            String to = states.size() > 1 ? states.get(1) : "";
+            String from;
+            String to;
+            if (step.containsKey("states")) {
+                List<String> states = ((List<?>) step.get("states")).stream()
+                        .map(String::valueOf).toList();
+                from = states.size() > 0 ? states.get(0) : "";
+                to = states.size() > 1 ? states.get(1) : "";
+            } else {
+                from = String.valueOf(step.getOrDefault("from", ""));
+                to = String.valueOf(step.getOrDefault("to", ""));
+            }
             String label = step.containsKey("label") ? String.valueOf(step.get("label")) : null;
             String note = step.containsKey("note") ? String.valueOf(step.get("note")) : null;
 
@@ -483,8 +576,17 @@ public class WorkflowRunner {
                 for (Map<String, Object> action : actions) {
                     String actor = String.valueOf(action.getOrDefault("actor", ""));
                     String method = String.valueOf(action.getOrDefault("method", ""));
-                    String args = action.containsKey("arguments")
-                            ? String.valueOf(action.get("arguments")) : null;
+                    String args = null;
+                    if (action.containsKey("arguments")) {
+                        Object rawArgs = action.get("arguments");
+                        if (rawArgs instanceof List) {
+                            // Convert List to JSON array string
+                            org.json.JSONArray jsonArr = new org.json.JSONArray((List<?>) rawArgs);
+                            args = jsonArr.toString();
+                        } else {
+                            args = String.valueOf(rawArgs);
+                        }
+                    }
                     actionDtos.add(new ActionDto(actor, method, args));
                 }
             }

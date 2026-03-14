@@ -736,6 +736,18 @@ tr.drag-over td {
     color: var(--accent-mauve);
     border: 1px solid var(--border-color);
     cursor: default;
+    text-decoration: none;
+}
+
+a.actor-action-link {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+}
+
+a.actor-action-link:hover {
+    color: var(--accent-blue);
+    text-decoration-style: solid;
 }
 
 .actor-children-list {

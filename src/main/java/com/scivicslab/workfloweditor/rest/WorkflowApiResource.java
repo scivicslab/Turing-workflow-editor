@@ -119,14 +119,19 @@ public class WorkflowApiResource {
     @Consumes("text/plain")
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, Object> importYaml(String yaml) {
-        WorkflowRunner.ParsedWorkflow parsed = WorkflowRunner.fromYaml(yaml);
-        List<MatrixRow> rows = WorkflowRunner.stepsToRows(parsed.steps());
-        state.replaceAll(parsed.name(), rows, state.getMaxIterations());
-        if (parsed.description() != null) {
-            state.setDescription(parsed.description());
+        try {
+            WorkflowRunner.ParsedWorkflow parsed = WorkflowRunner.fromYaml(yaml);
+            List<MatrixRow> rows = WorkflowRunner.stepsToRows(parsed.steps());
+            state.replaceAll(parsed.name(), rows, state.getMaxIterations());
+            if (parsed.description() != null) {
+                state.setDescription(parsed.description());
+            }
+            notifyStateChanged("YAML imported: " + parsed.name());
+            return Map.of("status", "ok", "name", parsed.name(), "stepCount", parsed.steps().size());
+        } catch (Exception e) {
+            logger.log(java.util.logging.Level.WARNING, "YAML import failed", e);
+            return Map.of("status", "error", "message", e.getClass().getSimpleName() + ": " + e.getMessage());
         }
-        notifyStateChanged("YAML imported: " + parsed.name());
-        return Map.of("status", "ok", "name", parsed.name(), "stepCount", parsed.steps().size());
     }
 
     // --- Direct YAML execution ---
