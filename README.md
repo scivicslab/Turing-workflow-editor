@@ -1,3 +1,5 @@
+[![Javadoc](https://img.shields.io/badge/javadoc-0.1.0-brightgreen.svg)](https://scivicslab.github.io/quarkus-workflow-editor/apidocs/)
+
 # POJO-actor Workflow Editor
 
 A Quarkus web UI for editing and executing [POJO-actor](https://github.com/scivicslab/POJO-actor) YAML workflows.
