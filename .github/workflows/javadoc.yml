@@ -34,7 +34,14 @@ jobs:
       - name: Prepare pages structure
         run: |
           mkdir -p _site/apidocs
-          cp -r target/site/apidocs/* _site/apidocs/
+          if [ -d target/site/apidocs ]; then
+            cp -r target/site/apidocs/* _site/apidocs/
+          elif [ -d target/apidocs ]; then
+            cp -r target/apidocs/* _site/apidocs/
+          else
+            echo "Javadoc output not found" && find target -name "*.html" | head -5
+            exit 1
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
