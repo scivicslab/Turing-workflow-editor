@@ -44,11 +44,18 @@
             <artifactId>quarkus-vertx</artifactId>
         </dependency>
 
-        <!-- POJO-actor workflow engine -->
+        <!-- POJO-actor core library -->
         <dependency>
             <groupId>com.scivicslab</groupId>
             <artifactId>pojo-actor</artifactId>
-            <version>3.0.0-SNAPSHOT</version>
+            <version>3.0.0</version>
+        </dependency>
+
+        <!-- Turing-workflow engine -->
+        <dependency>
+            <groupId>com.scivicslab</groupId>
+            <artifactId>turing-workflow</artifactId>
+            <version>1.0.0</version>
         </dependency>
 
         <!-- YAML parsing -->
@@ -56,6 +63,13 @@
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
             <version>2.4</version>
+        </dependency>
+
+        <!-- MCP Server (HTTP transport) -->
+        <dependency>
+            <groupId>io.quarkiverse.mcp</groupId>
+            <artifactId>quarkus-mcp-server-http</artifactId>
+            <version>1.10.0</version>
         </dependency>
 
         <!-- Test -->

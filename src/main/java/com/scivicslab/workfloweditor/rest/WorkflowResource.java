@@ -116,21 +116,33 @@ public class WorkflowResource {
 
         int maxIter = request.maxIterations != null && request.maxIterations > 0 ? request.maxIterations : 100;
         Level logLevel = parseLogLevel(request.logLevel);
-        List<MatrixRow> rows = request.rows;
-        if (rows == null && request.steps != null) {
-            rows = WorkflowRunner.stepsToRows(request.steps);
-        }
-        workflowState.replaceAll(request.name, rows, maxIter);
 
-        final List<MatrixRow> finalRows = rows;
-        Thread.startVirtualThread(() -> {
-            try {
-                runner.run(request.name, finalRows, maxIter, logLevel, this::emitSse);
-            } catch (Exception e) {
-                logger.log(Level.WARNING, "Workflow failed", e);
-                emitSse(new WorkflowEvent("error", e.getMessage(), null, null));
-            }
-        });
+        if (request.steps != null) {
+            // Use structured steps (supports delay/breakpoint)
+            String yaml = WorkflowRunner.toYamlStructured(request.name, null, request.steps);
+            List<MatrixRow> rows = WorkflowRunner.stepsToRows(request.steps);
+            workflowState.replaceAll(request.name, rows, maxIter);
+            Thread.startVirtualThread(() -> {
+                try {
+                    runner.runYaml(yaml, maxIter, logLevel, this::emitSse);
+                } catch (Exception e) {
+                    logger.log(Level.WARNING, "Workflow failed", e);
+                    emitSse(new WorkflowEvent("error", e.getMessage(), null, null));
+                }
+            });
+        } else {
+            List<MatrixRow> rows = request.rows;
+            workflowState.replaceAll(request.name, rows, maxIter);
+            final List<MatrixRow> finalRows = rows;
+            Thread.startVirtualThread(() -> {
+                try {
+                    runner.run(request.name, finalRows, maxIter, logLevel, this::emitSse);
+                } catch (Exception e) {
+                    logger.log(Level.WARNING, "Workflow failed", e);
+                    emitSse(new WorkflowEvent("error", e.getMessage(), null, null));
+                }
+            });
+        }
 
         return Map.of("status", "started");
     }

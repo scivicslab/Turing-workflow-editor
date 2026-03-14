@@ -29,9 +29,12 @@
 
     var tabList = document.getElementById('tabList');
     var addTabBtn = document.getElementById('addTabBtn');
+    var resumeBtn = document.getElementById('resumeBtn');
     var logResizer = document.getElementById('logResizer');
     var logSection = document.querySelector('.log-section');
     var logLevelSelect = document.getElementById('logLevelSelect');
+    var globalDelayInput = document.getElementById('globalDelay');
+    var applyDelayBtn = document.getElementById('applyDelayBtn');
 
     var sessionId = 'session-' + Date.now();
     var eventSource = null;
@@ -119,8 +122,12 @@
                     loadFromServer();
                     return;
                 }
+                if (event.type === 'paused') {
+                    resumeBtn.style.display = 'inline-block';
+                }
                 if (event.type === 'completed' || event.type === 'error' || event.type === 'stopped') {
                     setRunning(false);
+                    resumeBtn.style.display = 'none';
                 }
             } catch (err) {}
         };
@@ -136,7 +143,7 @@
         if (type === 'output') {
             div.textContent = message || '';
         } else {
-            var ts = new Date().toLocaleTimeString();
+            var ts = new Date().toISOString();
             div.textContent = '[' + ts + '] ' + (message || '');
         }
         logOutput.appendChild(div);
@@ -311,7 +318,7 @@
 
     // --- Step Group Creation ---
 
-    function createStepGroup(from, to, label, note, actions) {
+    function createStepGroup(from, to, label, note, actions, delay, breakpoint) {
         var group = document.createElement('div');
         group.className = 'step-group';
         group.draggable = true;
@@ -359,6 +366,25 @@
         noteInput.value = note || '';
         noteInput.placeholder = 'note';
 
+        var delayInput = document.createElement('input');
+        delayInput.className = 'step-delay';
+        delayInput.type = 'number';
+        delayInput.min = '0';
+        delayInput.value = delay || 0;
+        delayInput.placeholder = 'delay(ms)';
+        delayInput.title = 'Delay before execution (ms)';
+        delayInput.style.width = '80px';
+
+        var bpLabel = document.createElement('label');
+        bpLabel.className = 'step-bp-label';
+        bpLabel.title = 'Breakpoint';
+        var bpCheck = document.createElement('input');
+        bpCheck.className = 'step-breakpoint';
+        bpCheck.type = 'checkbox';
+        bpCheck.checked = !!breakpoint;
+        bpLabel.appendChild(bpCheck);
+        bpLabel.appendChild(document.createTextNode(' BP'));
+
         var actionsBar = document.createElement('div');
         actionsBar.className = 'step-actions-bar';
 
@@ -389,6 +415,8 @@
         header.appendChild(statesDiv);
         header.appendChild(labelInput);
         header.appendChild(noteInput);
+        header.appendChild(delayInput);
+        header.appendChild(bpLabel);
         header.appendChild(actionsBar);
         group.appendChild(header);
 
@@ -555,11 +583,15 @@
         var steps = [];
         for (var i = 0; i < groups.length; i++) {
             var g = groups[i];
+            var delayVal = parseInt(g.querySelector('.step-delay').value, 10) || 0;
+            var bpVal = g.querySelector('.step-breakpoint').checked;
             var step = {
                 from: g.querySelector('.step-from').value.trim(),
                 to: g.querySelector('.step-to').value.trim(),
                 label: g.querySelector('.step-label').value.trim() || null,
                 note: g.querySelector('.step-note-input').value.trim() || null,
+                delay: delayVal > 0 ? delayVal : null,
+                breakpoint: bpVal || null,
                 actions: []
             };
             var actionRows = g.querySelectorAll('.action-table tbody tr');
@@ -623,9 +655,9 @@
     }
 
     runBtn.addEventListener('click', function () {
-        var rows = getRows();
-        if (rows.length === 0) {
-            appendLog('error', 'No valid rows to run');
+        var steps = getSteps();
+        if (steps.length === 0) {
+            appendLog('error', 'No valid steps to run');
             return;
         }
 
@@ -637,7 +669,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: activeTabName || 'workflow',
-                rows: rows,
+                steps: steps,
                 maxIterations: getMaxIterations(),
                 logLevel: logLevelSelect.value
             })
@@ -662,6 +694,20 @@
         });
     });
 
+    resumeBtn.addEventListener('click', function () {
+        fetch('/api/resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+            if (data.status === 'ok') {
+                resumeBtn.style.display = 'none';
+                appendLog('info', 'Workflow resumed');
+            }
+        });
+    });
+
     // --- Export YAML ---
 
     exportYamlBtn.addEventListener('click', function () {
@@ -681,6 +727,12 @@
             }
             if (step.note) {
                 yaml += '  note: "' + step.note.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"\n';
+            }
+            if (step.delay && step.delay > 0) {
+                yaml += '  delay: ' + step.delay + '\n';
+            }
+            if (step.breakpoint) {
+                yaml += '  breakpoint: true\n';
             }
             yaml += '  actions:\n';
             for (var j = 0; j < step.actions.length; j++) {
@@ -759,7 +811,7 @@
         if (steps && steps.length > 0) {
             for (var i = 0; i < steps.length; i++) {
                 var s = steps[i];
-                var group = createStepGroup(s.from, s.to, s.label, s.note, s.actions);
+                var group = createStepGroup(s.from, s.to, s.label, s.note, s.actions, s.delay, s.breakpoint);
                 stepsContainer.appendChild(group);
             }
         } else {
@@ -768,6 +820,8 @@
                 [{ actor: 'log', method: 'info', arguments: 'Workflow started' }]));
             stepsContainer.appendChild(createStepGroup('1', 'end', null, null,
                 [{ actor: 'log', method: 'info', arguments: 'Workflow finished' }]));
+            stepsContainer.appendChild(createStepGroup('!end', 'end', 'catch-all', 'Prevent infinite loop: catch unmatched states',
+                [{ actor: 'log', method: 'warn', arguments: 'Unexpected state - forcing end' }]));
         }
         renumberAll();
         saveToLocalStorage();
@@ -926,6 +980,18 @@
 
     // Auto-save on description changes
     descriptionArea.addEventListener('input', saveToLocalStorage);
+
+    // --- Global Delay Apply ---
+
+    applyDelayBtn.addEventListener('click', function () {
+        var val = parseInt(globalDelayInput.value, 10) || 0;
+        var delayInputs = stepsContainer.querySelectorAll('.step-delay');
+        for (var i = 0; i < delayInputs.length; i++) {
+            delayInputs[i].value = val;
+        }
+        appendLog('info', 'Applied delay ' + val + 'ms to all ' + delayInputs.length + ' steps');
+        saveToLocalStorage();
+    });
 
     // --- Initialize ---
 

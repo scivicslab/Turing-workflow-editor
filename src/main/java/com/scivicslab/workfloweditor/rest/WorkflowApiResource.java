@@ -147,7 +147,7 @@ public class WorkflowApiResource {
 
         notifyStateChanged("YAML workflow started: " + parsed.name());
         var emitter = workflowResource.getSseEmitter();
-        Thread.startVirtualThread(() -> runner.runYaml(yaml, maxIter, emitter));
+        Thread.startVirtualThread(() -> runner.runYaml(yaml, maxIter, null, emitter));
         return Map.of("status", "started", "name", parsed.name());
     }
 
@@ -159,10 +159,22 @@ public class WorkflowApiResource {
     public Map<String, Object> status() {
         return Map.of(
                 "running", runner.isRunning(),
+                "paused", runner.isPaused(),
                 "workflowName", state.getName(),
                 "maxIterations", state.getMaxIterations(),
                 "stepCount", state.size()
         );
+    }
+
+    @POST
+    @Path("/resume")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, String> resume() {
+        if (!runner.isPaused()) {
+            return Map.of("status", "error", "message", "Workflow is not paused");
+        }
+        runner.resume();
+        return Map.of("status", "ok", "message", "Workflow resumed");
     }
 
     // --- Transitions / sub-actions ---

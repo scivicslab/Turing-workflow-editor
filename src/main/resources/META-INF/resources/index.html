@@ -3,18 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POJO-actor Workflow</title>
+    <title>Turing Workflow</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <header>
-        <h1>POJO-actor Workflow</h1>
+        <h1>Turing Workflow</h1>
         <div class="header-controls">
             <label for="maxIterations" style="color:var(--text-secondary);font-size:12px;white-space:nowrap;">Max iter:</label>
             <input type="number" id="maxIterations" value="100" min="1" max="999999999" style="width:110px;">
             <label style="color:var(--text-secondary);font-size:12px;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="infiniteCheck"> ∞</label>
+            <label for="globalDelay" style="color:var(--text-secondary);font-size:12px;white-space:nowrap;">Delay(ms):</label>
+            <input type="number" id="globalDelay" value="0" min="0" style="width:80px;">
+            <button id="applyDelayBtn" class="btn btn-small">Apply</button>
             <button id="runBtn" class="btn btn-run">Run</button>
             <button id="stopBtn" class="btn btn-stop" disabled>Stop</button>
+            <button id="resumeBtn" class="btn btn-resume" style="display:none">Resume</button>
             <select id="themeSelect">
                 <option value="dark-catppuccin">Dark Catppuccin</option>
                 <option value="dark-nord">Dark Nord</option>
