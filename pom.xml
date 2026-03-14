@@ -55,7 +55,7 @@
         <dependency>
             <groupId>com.scivicslab</groupId>
             <artifactId>turing-workflow</artifactId>
-            <version>1.0.0</version>
+            <version>3.0.0</version>
         </dependency>
 
         <!-- YAML parsing -->
