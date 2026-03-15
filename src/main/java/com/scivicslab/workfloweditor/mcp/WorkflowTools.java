@@ -28,6 +28,9 @@ public class WorkflowTools {
     @Inject
     WorkflowRunner runner;
 
+    @Inject
+    WorkflowResource workflowResource;
+
     @Tool(description = "Run a YAML workflow and return the execution result. "
             + "This is a synchronous call that waits for completion.")
     String runWorkflow(
@@ -42,10 +45,14 @@ public class WorkflowTools {
         List<String> events = new ArrayList<>();
         CountDownLatch latch = new CountDownLatch(1);
 
+        var sseEmitter = workflowResource.getSseEmitter();
+
         Thread.startVirtualThread(() -> {
             try {
                 runner.runYaml(yaml, maxIter, null, event -> {
                     events.add("[" + event.type() + "] " + event.message());
+                    // Also forward to browser UI via SSE
+                    sseEmitter.accept(event);
                 });
             } finally {
                 latch.countDown();
@@ -109,6 +116,15 @@ public class WorkflowTools {
         if (parsed.description() != null) {
             state.setDescription(parsed.description());
         }
+        // Notify browser UI to reload
+        try {
+            java.net.http.HttpClient.newHttpClient().send(
+                java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8091/api/refresh"))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.noBody())
+                    .build(),
+                java.net.http.HttpResponse.BodyHandlers.discarding());
+        } catch (Exception ignored) {}
         return "Imported: " + parsed.name() + " (" + parsed.steps().size() + " steps)";
     }
 

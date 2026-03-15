@@ -47,49 +47,35 @@ public class WorkflowResource {
     @Inject
     ObjectMapper objectMapper;
 
-    private final AtomicReference<HttpServerResponse> sseConnection = new AtomicReference<>();
-    private volatile Long heartbeatTimerId = null;
+    private final java.util.concurrent.CopyOnWriteArrayList<HttpServerResponse> sseConnections = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     void registerSseRoute(@Observes Router router) {
         router.get("/api/events").handler(this::handleSseConnect);
     }
 
     private void handleSseConnect(RoutingContext rc) {
-        var prev = sseConnection.get();
-        if (prev != null && !prev.ended()) {
-            try { prev.end(); } catch (Exception ignored) {}
-        }
-        if (heartbeatTimerId != null) {
-            vertx.cancelTimer(heartbeatTimerId);
-        }
-
         var response = rc.response();
         response.setChunked(true);
         response.putHeader("Content-Type", "text/event-stream");
         response.putHeader("Cache-Control", "no-cache");
         response.putHeader("X-Accel-Buffering", "no");
 
-        sseConnection.set(response);
-        response.write("retry: 10000\n\n");
+        sseConnections.add(response);
+        response.write("retry: 30000\n\n");
 
-        heartbeatTimerId = vertx.setPeriodic(15_000, id -> {
-            var r = sseConnection.get();
-            if (r != null && !r.ended()) {
-                r.write(": heartbeat\n\n");
-            } else {
+        vertx.setPeriodic(15_000, id -> {
+            if (response.ended()) {
                 vertx.cancelTimer(id);
+                return;
             }
+            response.write(": heartbeat\n\n");
         });
 
         response.closeHandler(v -> {
-            sseConnection.compareAndSet(response, null);
-            if (heartbeatTimerId != null) {
-                vertx.cancelTimer(heartbeatTimerId);
-                heartbeatTimerId = null;
-            }
+            sseConnections.remove(response);
         });
 
-        logger.info("SSE connected");
+        logger.info("SSE connected (total: " + sseConnections.size() + ")");
     }
 
     /**
@@ -158,18 +144,37 @@ public class WorkflowResource {
         return Map.of("status", "stopped");
     }
 
+    /**
+     * Tells the browser to reload the workflow editor UI.
+     */
+    @POST
+    @Path("/refresh")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, String> refresh() {
+        emitSse(new WorkflowEvent("state-changed", "Refresh requested", null, null));
+        return Map.of("status", "ok");
+    }
+
     private void emitSse(WorkflowEvent event) {
-        var resp = sseConnection.get();
-        if (resp != null && !resp.ended()) {
-            vertx.runOnContext(v -> {
-                try {
-                    String json = objectMapper.writeValueAsString(event);
-                    resp.write("data: " + json + "\n\n");
-                } catch (Exception e) {
-                    logger.log(Level.WARNING, "Failed to write SSE event", e);
-                }
-            });
+        logger.info("emitSse called: type=" + event.type() + " message=" + event.message());
+        if (sseConnections.isEmpty()) {
+            logger.warning("SSE event DROPPED (no connections): type=" + event.type());
+            return;
         }
+        vertx.runOnContext(v -> {
+            try {
+                String json = objectMapper.writeValueAsString(event);
+                String data = "data: " + json + "\n\n";
+                for (var resp : sseConnections) {
+                    if (!resp.ended()) {
+                        resp.write(data);
+                    }
+                }
+                logger.info("SSE event BROADCAST to " + sseConnections.size() + " connections: type=" + event.type());
+            } catch (Exception e) {
+                logger.log(Level.WARNING, "Failed to write SSE event", e);
+            }
+        });
     }
 
     /**

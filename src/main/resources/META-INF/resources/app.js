@@ -115,10 +115,12 @@
 
         eventSource.onmessage = function (e) {
             try {
+                console.log('SSE received:', e.data);
                 var event = JSON.parse(e.data);
                 appendLog(event.type, event.message);
 
                 if (event.type === 'state-changed') {
+                    console.log('state-changed -> calling loadFromServer');
                     loadFromServer();
                     return;
                 }
@@ -321,7 +323,7 @@
     function createStepGroup(from, to, label, note, actions, delay, breakpoint) {
         var group = document.createElement('div');
         group.className = 'step-group';
-        group.draggable = true;
+        group.draggable = false;
 
         // Header
         var header = document.createElement('div');
@@ -388,11 +390,6 @@
         var actionsBar = document.createElement('div');
         actionsBar.className = 'step-actions-bar';
 
-        var dragHandle = document.createElement('button');
-        dragHandle.innerHTML = '&#x2630;';
-        dragHandle.title = 'Drag to reorder';
-        dragHandle.style.cursor = 'grab';
-
         var addActionBtn = document.createElement('button');
         addActionBtn.textContent = '+ Action';
         addActionBtn.title = 'Add action';
@@ -406,7 +403,6 @@
         deleteStepBtn.innerHTML = '&times;';
         deleteStepBtn.title = 'Delete step';
 
-        actionsBar.appendChild(dragHandle);
         actionsBar.appendChild(addActionBtn);
         actionsBar.appendChild(insertStepBtn);
         actionsBar.appendChild(deleteStepBtn);
@@ -479,42 +475,7 @@
             saveToLocalStorage();
         });
 
-        // Drag and drop for step groups
-        group.addEventListener('dragstart', function (e) {
-            dragStep = group;
-            group.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-        });
-
-        group.addEventListener('dragend', function () {
-            group.classList.remove('dragging');
-            dragStep = null;
-            var allGroups = stepsContainer.querySelectorAll('.step-group');
-            for (var i = 0; i < allGroups.length; i++) {
-                allGroups[i].classList.remove('drag-over');
-            }
-            renumberAll();
-            saveToLocalStorage();
-        });
-
-        group.addEventListener('dragover', function (e) {
-            e.preventDefault();
-            if (dragStep && dragStep !== group) {
-                group.classList.add('drag-over');
-            }
-        });
-
-        group.addEventListener('dragleave', function () {
-            group.classList.remove('drag-over');
-        });
-
-        group.addEventListener('drop', function (e) {
-            e.preventDefault();
-            group.classList.remove('drag-over');
-            if (dragStep && dragStep !== group) {
-                stepsContainer.insertBefore(dragStep, group);
-            }
-        });
+        // Drag and drop disabled — was interfering with text selection in argument fields
 
         // Auto-save on input changes
         header.addEventListener('input', saveToLocalStorage);
@@ -869,7 +830,8 @@
     // --- Utility ---
 
     function escapeAttr(s) {
-        return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        var str = String(s || '');
+        return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     function autoResize(el) {

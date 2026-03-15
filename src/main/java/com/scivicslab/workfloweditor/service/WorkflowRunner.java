@@ -95,7 +95,7 @@ public class WorkflowRunner {
         List<String> children = new ArrayList<>(actor.getNamesOfChildren());
         info.put("children", children);
 
-        List<String> actions = discoverActions(actor);
+        List<Map<String, String>> actions = discoverActions(actor);
         info.put("actions", actions);
 
         result.add(info);
