@@ -204,7 +204,7 @@ public class WorkflowRunner {
         try {
             String workflowName = name != null ? name : "workflow";
             String yaml = toYaml(workflowName, rows);
-            logger.info("Generated YAML:\n" + yaml);
+            logger.fine("Generated YAML:\n" + yaml);
             effectiveEmitter.accept(new WorkflowEvent("info", "Workflow started: " + workflowName, null, null));
 
             Interpreter interpreter = new Interpreter.Builder()
@@ -220,8 +220,8 @@ public class WorkflowRunner {
             interpreter.setActionFailureListener((transition, state, result) -> {
                 String failMsg = "Action failed at state '" + state + "' transition "
                         + transition.getStates() + ": " + result.getResult();
-                logger.warning(failMsg);
-                effectiveEmitter.accept(new WorkflowEvent("error", failMsg, state, null));
+                logger.finest(failMsg);
+                effectiveEmitter.accept(new WorkflowEvent("finest", failMsg, state, null));
             });
 
             interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
@@ -243,7 +243,7 @@ public class WorkflowRunner {
                     break;
                 }
 
-                effectiveEmitter.accept(new WorkflowEvent("step", result.getResult(), currentState, null));
+                effectiveEmitter.accept(new WorkflowEvent("fine", result.getResult(), currentState, null));
                 iteration++;
 
                 if ("end".equals(interpreter.getCurrentState())) {
@@ -253,7 +253,7 @@ public class WorkflowRunner {
             }
 
             if (iteration >= maxIterations) {
-                effectiveEmitter.accept(new WorkflowEvent("error", "Max iterations reached (" + maxIterations + ")", null, null));
+                effectiveEmitter.accept(new WorkflowEvent("warning", "Max iterations reached (" + maxIterations + ")", null, null));
             }
             if (stopRequested && !interpreter.isStopRequested()) {
                 effectiveEmitter.accept(new WorkflowEvent("stopped", "Workflow stopped by user", null, null));
@@ -368,7 +368,7 @@ public class WorkflowRunner {
                 effectiveEmitter.accept(new WorkflowEvent("output", "[stderr] " + line, null, null))), true));
 
         try {
-            logger.info("Running YAML directly:\n" + yaml);
+            logger.fine("Running YAML directly:\n" + yaml);
             effectiveEmitter.accept(new WorkflowEvent("info", "Workflow started (YAML)", null, null));
 
             Interpreter interpreter = new Interpreter.Builder()
@@ -384,8 +384,8 @@ public class WorkflowRunner {
             interpreter.setActionFailureListener((transition, state, result) -> {
                 String failMsg = "Action failed at state '" + state + "' transition "
                         + transition.getStates() + ": " + result.getResult();
-                logger.warning(failMsg);
-                effectiveEmitter.accept(new WorkflowEvent("error", failMsg, state, null));
+                logger.finest(failMsg);
+                effectiveEmitter.accept(new WorkflowEvent("finest", failMsg, state, null));
             });
 
             interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
@@ -396,12 +396,12 @@ public class WorkflowRunner {
             effectiveEmitter.accept(new WorkflowEvent("info", initMsg, null, null));
             if (interpreter.hasCodeLoaded()) {
                 var debugTransitions = interpreter.getCode().getTransitions();
-                effectiveEmitter.accept(new WorkflowEvent("info", "Transition count: " + debugTransitions.size(), null, null));
+                effectiveEmitter.accept(new WorkflowEvent("fine", "Transition count: " + debugTransitions.size(), null, null));
                 for (int t = 0; t < debugTransitions.size(); t++) {
                     var tr = debugTransitions.get(t);
                     String trMsg = "  [" + t + "] states=" + tr.getStates() + " label=" + tr.getLabel();
-                    logger.info(trMsg);
-                    effectiveEmitter.accept(new WorkflowEvent("info", trMsg, null, null));
+                    logger.fine(trMsg);
+                    effectiveEmitter.accept(new WorkflowEvent("fine", trMsg, null, null));
                 }
             } else {
                 effectiveEmitter.accept(new WorkflowEvent("error", "No code loaded!", null, null));
@@ -415,8 +415,8 @@ public class WorkflowRunner {
                 String stepDebug = "execCode result: success=" + (result != null && result.isSuccess())
                         + " state=" + currentState
                         + " msg=" + (result != null ? result.getResult() : "null");
-                logger.info(stepDebug);
-                effectiveEmitter.accept(new WorkflowEvent("info", stepDebug, currentState, null));
+                logger.fine(stepDebug);
+                effectiveEmitter.accept(new WorkflowEvent("fine", stepDebug, currentState, null));
 
                 if (result == null || !result.isSuccess()) {
                     if ("end".equals(currentState)) {
@@ -430,7 +430,7 @@ public class WorkflowRunner {
                     break;
                 }
 
-                effectiveEmitter.accept(new WorkflowEvent("step", result.getResult(), currentState, null));
+                effectiveEmitter.accept(new WorkflowEvent("fine", result.getResult(), currentState, null));
                 iteration++;
 
                 if ("end".equals(interpreter.getCurrentState())) {
@@ -440,7 +440,7 @@ public class WorkflowRunner {
             }
 
             if (iteration >= maxIterations) {
-                effectiveEmitter.accept(new WorkflowEvent("error", "Max iterations reached (" + maxIterations + ")", null, null));
+                effectiveEmitter.accept(new WorkflowEvent("warning", "Max iterations reached (" + maxIterations + ")", null, null));
             }
             if (stopRequested) {
                 effectiveEmitter.accept(new WorkflowEvent("stopped", "Workflow stopped by user", null, null));

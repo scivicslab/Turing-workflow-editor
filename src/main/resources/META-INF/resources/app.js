@@ -127,7 +127,7 @@
                 if (event.type === 'paused') {
                     resumeBtn.style.display = 'inline-block';
                 }
-                if (event.type === 'completed' || event.type === 'error' || event.type === 'stopped') {
+                if (event.type === 'completed' || event.type === 'error' || event.type === 'warning' || event.type === 'stopped') {
                     setRunning(false);
                     resumeBtn.style.display = 'none';
                 }
@@ -139,7 +139,22 @@
 
     // --- Log ---
 
+    var LOG_LEVELS = { 'OFF': 0, 'SEVERE': 1, 'WARNING': 2, 'INFO': 3, 'CONFIG': 4, 'FINE': 5, 'FINER': 6, 'FINEST': 7, 'ALL': 8 };
+    var LOG_TYPE_TO_LEVEL = { 'error': 'SEVERE', 'warning': 'WARNING', 'info': 'INFO', 'fine': 'FINE', 'finer': 'FINER', 'finest': 'FINEST', 'output': 'ALL', 'completed': 'INFO', 'stopped': 'INFO', 'paused': 'INFO', 'state-changed': 'INFO' };
+
+    var ALWAYS_SHOW = { 'output': true, 'completed': true, 'stopped': true, 'paused': true, 'warning': true, 'error': true, 'state-changed': true };
+
+    function shouldLog(type) {
+        if (ALWAYS_SHOW[type]) return true;
+        var currentLevel = logLevelSelect.value || 'INFO';
+        if (currentLevel === 'OFF') return false;
+        var threshold = LOG_LEVELS[currentLevel] || 3;
+        var typeLevel = LOG_LEVELS[LOG_TYPE_TO_LEVEL[type]] || 3;
+        return typeLevel <= threshold;
+    }
+
     function appendLog(type, message) {
+        if (!shouldLog(type)) return;
         var div = document.createElement('div');
         div.className = 'log-entry ' + (type || 'info');
         if (type === 'output') {
