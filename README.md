@@ -1,4 +1,4 @@
-[![Javadoc](https://img.shields.io/badge/javadoc-0.1.0-brightgreen.svg)](https://scivicslab.github.io/quarkus-workflow-editor/apidocs/)
+[![Javadoc](https://img.shields.io/badge/javadoc-1.0.0-brightgreen.svg)](https://scivicslab.github.io/turing-workflow-editor/apidocs/)
 
 # POJO-actor Workflow Editor
 
@@ -20,7 +20,7 @@ A Quarkus web UI for editing and executing [POJO-actor](https://github.com/scivi
 ## Build & Run
 
 ```bash
-cd quarkus-workflow-editor
+cd turing-workflow-editor
 rm -rf target
 mvn install
 java -jar target/quarkus-app/quarkus-run.jar
