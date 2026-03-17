@@ -794,6 +794,21 @@ a.actor-action-link:hover {
     background: var(--bg-secondary);
 }
 
+.step-group.step-running {
+    border-color: var(--accent-green);
+    border-width: 2px;
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent-green) 30%, transparent);
+}
+
+.step-group.step-running .step-header {
+    background: color-mix(in srgb, var(--accent-green) 10%, var(--bg-tertiary));
+}
+
+.step-group.step-done {
+    border-color: var(--text-secondary);
+    opacity: 0.6;
+}
+
 .step-group.dragging {
     opacity: 0.4;
 }

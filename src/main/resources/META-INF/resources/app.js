@@ -119,6 +119,22 @@
                 var event = JSON.parse(e.data);
                 appendLog(event.type, event.message);
 
+                // Highlight the step currently being executed
+                if (isRunning && event.state) {
+                    // The previous step (whose to = event.state) just finished
+                    // Mark it as done, then highlight the next step (whose from = event.state)
+                    var groups = stepsContainer.querySelectorAll('.step-group');
+                    for (var i = 0; i < groups.length; i++) {
+                        var to = groups[i].querySelector('.step-to').value.trim();
+                        if (to === event.state) {
+                            groups[i].classList.remove('step-running');
+                            groups[i].classList.add('step-done');
+                            break;
+                        }
+                    }
+                    highlightStep(event.state);
+                }
+
                 if (event.type === 'state-changed') {
                     console.log('state-changed -> calling loadFromServer');
                     loadFromServer();
@@ -129,6 +145,8 @@
                 }
                 if (event.type === 'completed' || event.type === 'error' || event.type === 'warning' || event.type === 'stopped') {
                     setRunning(false);
+                    // Keep highlights for a moment so user can see the final state
+                    setTimeout(clearAllHighlights, 2000);
                     resumeBtn.style.display = 'none';
                 }
             } catch (err) {}
@@ -630,6 +648,43 @@
         stopBtn.disabled = !running;
     }
 
+    // --- Step Highlighting ---
+
+    function highlightStep(fromState) {
+        var groups = stepsContainer.querySelectorAll('.step-group');
+        for (var i = 0; i < groups.length; i++) {
+            groups[i].classList.remove('step-running');
+        }
+        if (!fromState) return;
+        for (var i = 0; i < groups.length; i++) {
+            var from = groups[i].querySelector('.step-from').value.trim();
+            if (from === fromState) {
+                groups[i].classList.add('step-running');
+                // Scroll into view if not visible
+                groups[i].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                break;
+            }
+        }
+    }
+
+    function markStepDone(fromState) {
+        var groups = stepsContainer.querySelectorAll('.step-group');
+        for (var i = 0; i < groups.length; i++) {
+            var from = groups[i].querySelector('.step-from').value.trim();
+            if (from === fromState) {
+                groups[i].classList.add('step-done');
+                break;
+            }
+        }
+    }
+
+    function clearAllHighlights() {
+        var groups = stepsContainer.querySelectorAll('.step-group');
+        for (var i = 0; i < groups.length; i++) {
+            groups[i].classList.remove('step-running', 'step-done');
+        }
+    }
+
     runBtn.addEventListener('click', function () {
         var steps = getSteps();
         if (steps.length === 0) {
@@ -638,6 +693,12 @@
         }
 
         setRunning(true);
+        clearAllHighlights();
+        // Highlight the first step as the starting point
+        var firstGroup = stepsContainer.querySelector('.step-group');
+        if (firstGroup) {
+            firstGroup.classList.add('step-running');
+        }
         appendLog('info', 'Starting workflow: ' + (activeTabName || 'workflow'));
 
         fetch('/api/run', {
