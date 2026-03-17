@@ -1,29 +1,38 @@
-[![Javadoc](https://img.shields.io/badge/javadoc-1.0.0-brightgreen.svg)](https://scivicslab.github.io/turing-workflow-editor/apidocs/)
+[![Javadoc](https://img.shields.io/badge/javadoc-1.0.0-brightgreen.svg)](https://scivicslab.github.io/Turing-workflow-editor/apidocs/)
 
-# POJO-actor Workflow Editor
+# Turing Workflow Editor
 
-A Quarkus web UI for editing and executing [POJO-actor](https://github.com/scivicslab/POJO-actor) YAML workflows.
+A web UI for editing and executing [POJO-actor](https://github.com/scivicslab/POJO-actor) YAML workflows. Built on Quarkus with [turing-workflow](https://github.com/scivicslab/turing-workflow) engine.
 
 ## Features
 
 - **Nested step-group editor** — Each step shows `from → to` states, `label`, `note`, and a sub-table of actions (actor, method, arguments)
+- **Multi-tab workflows** — Work on multiple workflows simultaneously with add/rename/delete tabs
 - **Workflow description** — Editable description field for the workflow
-- **Real-time execution log** — Instant output via SSE (Server-Sent Events) with configurable log levels (ALL / INFO / OFF)
-- **Stop control** — Stop running workflows via `Interpreter.requestStop()`
+- **Real-time execution log** — Live output via SSE with configurable log levels (ALL / INFO / OFF)
+- **Run / Stop / Resume** — Full execution control including pause/resume support
+- **Visual step highlighting** — Active step is highlighted during workflow execution
 - **Built-in actors** — `shell` (command execution), `log` (logging), `loader` (dynamic JAR loading)
-- **REST API** — External workflow manipulation (CRUD, YAML import/export, run/stop)
 - **Dynamic actor loading** — Load actors from JARs at runtime via `DynamicActorLoaderActor`
-- **localStorage persistence** — Browser state survives across server restarts and page reloads
+- **MCP Server** — Exposes workflow operations as MCP tools via `quarkus-mcp-server-http`
+- **REST API** — Full CRUD, YAML import/export, run/stop/resume
 - **YAML import/export** — Server-side SnakeYAML parsing with full support for `description`, `label`, `note`
-- **10 themes** — 5 dark + 5 light, persisted in `localStorage`
+- **localStorage persistence** — Browser state (tabs, theme, settings) survives across server restarts
+- **10 themes** — 5 dark (Catppuccin, Nord, Blue, Green, Red) + 5 light (Clean, Warm, Blue, Green, Red)
 
 ## Build & Run
 
 ```bash
-cd turing-workflow-editor
+cd Turing-workflow-editor
 rm -rf target
 mvn install
 java -jar target/quarkus-app/quarkus-run.jar
+```
+
+Or download a native image binary from [Releases](https://github.com/scivicslab/Turing-workflow-editor/releases):
+
+```bash
+./turing-workflow-editor-v1.0.0-linux-x86_64
 ```
 
 Starts on port 8091 by default (configurable in `application.properties`).
@@ -34,11 +43,21 @@ Starts on port 8091 by default (configurable in `application.properties`).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/workflow` | Get current workflow (returns both `steps` and `rows`) |
-| `PUT` | `/api/workflow` | Replace entire workflow (accepts `steps` or `rows`) |
+| `GET` | `/api/workflow` | Get current workflow |
+| `PUT` | `/api/workflow` | Replace entire workflow |
 | `POST` | `/api/workflow/steps?index=N` | Add a step (`index` omitted = append) |
 | `PUT` | `/api/workflow/steps/{index}` | Update a step |
 | `DELETE` | `/api/workflow/steps/{index}` | Delete a step |
+
+### Tabs
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/tabs` | List all tabs |
+| `POST` | `/api/tabs` | Create a new tab |
+| `DELETE` | `/api/tabs/{name}` | Delete a tab |
+| `PUT` | `/api/tabs/{name}/activate` | Switch to a tab |
+| `PUT` | `/api/tabs/{name}/rename` | Rename a tab |
 
 ### Transition / Sub-action Operations
 
@@ -53,7 +72,7 @@ Starts on port 8091 by default (configurable in `application.properties`).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/yaml/export` | Export as YAML (with `description`, `label`, `note`) |
+| `GET` | `/api/yaml/export` | Export as YAML |
 | `POST` | `/api/yaml/import` | Import YAML (`Content-Type: text/plain`) |
 
 ### Execution Control
@@ -63,7 +82,9 @@ Starts on port 8091 by default (configurable in `application.properties`).
 | `POST` | `/api/run` | Run with UI-format request |
 | `POST` | `/api/run/yaml` | Run YAML directly |
 | `POST` | `/api/stop` | Stop running workflow |
+| `POST` | `/api/resume` | Resume paused workflow |
 | `GET` | `/api/status` | Get execution status |
+| `GET` | `/api/events` | SSE stream for live log output |
 
 ### Dynamic Actor Loading
 
@@ -71,37 +92,29 @@ Starts on port 8091 by default (configurable in `application.properties`).
 |--------|------|-------------|
 | `POST` | `/api/loader/load-jar` | Load a JAR (`{"path": "..."}`) |
 | `POST` | `/api/loader/create-child` | Create an actor (`{"name": "...", "className": "..."}`) |
-| `GET` | `/api/actors` | List registered actors |
+| `GET` | `/api/actors` | List registered actors with available actions |
 
-## Example: Run `turing87.yaml` via API
+## Example: Run `llm-hello.yaml` via API
 
 ```bash
-# 1. Load JAR
-curl -X POST http://localhost:8091/api/loader/load-jar \
-  -H 'Content-Type: application/json' \
-  -d '{"path": "/path/to/actor-WF-examples.jar"}'
-
-# 2. Create actor
-curl -X POST http://localhost:8091/api/loader/create-child \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "turing", "className": "com.scivicslab.turing.TuringActionIIAR"}'
-
-# 3. Import YAML (reflected in browser)
+# 1. Import YAML (reflected in browser)
 curl -X POST http://localhost:8091/api/yaml/import \
   -H 'Content-Type: text/plain' \
-  -d @turing87.yaml
+  -d @examples/llm-hello.yaml
 
-# 4. Run
+# 2. Run
 curl -X POST http://localhost:8091/api/run/yaml \
   -H 'Content-Type: text/plain' \
-  -d @turing87.yaml
+  -d @examples/llm-hello.yaml
 ```
 
 ## Dependencies
 
-- [POJO-actor](https://github.com/scivicslab/POJO-actor) — Workflow execution engine
-- Quarkus 3.x — Web framework
+- [POJO-actor](https://github.com/scivicslab/POJO-actor) — Actor framework
+- [turing-workflow](https://github.com/scivicslab/turing-workflow) — Workflow execution engine
+- Quarkus 3.28 — Web framework
 - SnakeYAML — YAML parser
+- quarkus-mcp-server-http — MCP server integration
 
 ## License
 
