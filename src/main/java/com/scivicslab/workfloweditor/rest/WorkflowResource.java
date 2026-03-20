@@ -18,6 +18,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
 import com.scivicslab.workfloweditor.service.WorkflowRunner.StepDto;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
 import java.util.Map;
@@ -209,6 +210,7 @@ public class WorkflowResource {
 
     // DTOs
 
+    @RegisterForReflection
     public static class RunRequest {
         public String name;
         public List<MatrixRow> rows;
@@ -217,7 +219,9 @@ public class WorkflowResource {
         public String logLevel;
     }
 
+    @RegisterForReflection
     public record MatrixRow(String from, String to, String actor, String method, String arguments) {}
 
+    @RegisterForReflection
     public record WorkflowEvent(String type, String message, String state, String action) {}
 }

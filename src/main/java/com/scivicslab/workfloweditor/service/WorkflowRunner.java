@@ -7,6 +7,7 @@ import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.Interpreter;
 import com.scivicslab.workfloweditor.rest.WorkflowResource.MatrixRow;
 import com.scivicslab.workfloweditor.rest.WorkflowResource.WorkflowEvent;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -691,7 +692,10 @@ public class WorkflowRunner {
         return steps;
     }
 
+    @RegisterForReflection
     public record ParsedWorkflow(String name, String description, List<StepDto> steps) {}
+    @RegisterForReflection
     public record StepDto(String from, String to, String label, String note, Long delay, Boolean breakpoint, List<ActionDto> actions) {}
+    @RegisterForReflection
     public record ActionDto(String actor, String method, String arguments) {}
 }
