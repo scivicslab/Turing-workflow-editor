@@ -44,11 +44,24 @@ public class ShellActor extends IIActorRef<ShellActor> {
         }
 
         // Strip JSON array wrapping if present: ["cmd"] -> cmd
+        // Use JSONArray parser to correctly unescape \n, \", etc.
         String cmd = command.trim();
-        if (cmd.startsWith("[\"") && cmd.endsWith("\"]")) {
-            cmd = cmd.substring(2, cmd.length() - 2);
+        if (cmd.startsWith("[")) {
+            try {
+                var jsonArray = new org.json.JSONArray(cmd);
+                if (jsonArray.length() > 0) {
+                    cmd = jsonArray.getString(0);
+                }
+            } catch (Exception e) {
+                // Not valid JSON array, use as-is
+            }
         } else if (cmd.startsWith("\"") && cmd.endsWith("\"")) {
-            cmd = cmd.substring(1, cmd.length() - 1);
+            try {
+                // Parse as JSON string to unescape
+                cmd = new org.json.JSONTokener(cmd).nextValue().toString();
+            } catch (Exception e) {
+                cmd = cmd.substring(1, cmd.length() - 1);
+            }
         }
 
         try {

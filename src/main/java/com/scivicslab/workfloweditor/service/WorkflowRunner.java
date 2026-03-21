@@ -519,11 +519,29 @@ public class WorkflowRunner {
         sb.append("        method: ").append(yamlEscape(row.method())).append("\n");
         if (row.arguments() != null && !row.arguments().isEmpty()) {
             String args = row.arguments();
-            if (args.startsWith("[") || args.startsWith("{")) {
-                sb.append("        arguments: ").append(args).append("\n");
-            } else {
-                sb.append("        arguments: \"").append(escapeYamlString(args)).append("\"\n");
+            appendYamlArguments(sb, args, "        ");
+        }
+    }
+
+    /**
+     * Appends arguments to YAML using block scalar (|) for multiline values
+     * and double-quoted strings for single-line values.
+     */
+    private static void appendYamlArguments(StringBuilder sb, String args, String indent) {
+        if (args.startsWith("[") || args.startsWith("{")) {
+            sb.append(indent).append("arguments: ").append(args).append("\n");
+        } else if (args.contains("\n")) {
+            // Multiline: use YAML block scalar to preserve newlines
+            sb.append(indent).append("arguments: |\n");
+            for (String line : args.split("\n", -1)) {
+                if (line.isEmpty()) {
+                    sb.append("\n");
+                } else {
+                    sb.append(indent).append("  ").append(line).append("\n");
+                }
             }
+        } else {
+            sb.append(indent).append("arguments: \"").append(escapeYamlString(args)).append("\"\n");
         }
     }
 
@@ -631,12 +649,7 @@ public class WorkflowRunner {
                 sb.append("    - actor: ").append(yamlEscape(action.actor())).append("\n");
                 sb.append("      method: ").append(yamlEscape(action.method())).append("\n");
                 if (action.arguments() != null && !action.arguments().isEmpty()) {
-                    String args = action.arguments();
-                    if (args.startsWith("[") || args.startsWith("{")) {
-                        sb.append("      arguments: ").append(args).append("\n");
-                    } else {
-                        sb.append("      arguments: \"").append(escapeYamlString(args)).append("\"\n");
-                    }
+                    appendYamlArguments(sb, action.arguments(), "      ");
                 }
             }
         }
