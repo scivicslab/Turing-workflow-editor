@@ -1169,29 +1169,6 @@
             node.appendChild(statusSpan);
         }
 
-        // Current step info for interpreters
-        if (actor.isInterpreter && actor.currentState) {
-            var stateSpan = document.createElement('span');
-            stateSpan.className = 'tree-node-state';
-            // Show note > label > step index > raw state
-            var stepText = '';
-            if (actor.stepNote) {
-                stepText = actor.stepNote;
-            } else if (actor.stepLabel) {
-                stepText = actor.stepLabel;
-            } else if (actor.stepIndex !== undefined && actor.stepIndex !== null) {
-                stepText = 'step ' + actor.stepIndex + (actor.totalSteps ? '/' + actor.totalSteps : '');
-            } else {
-                stepText = actor.currentState;
-            }
-            stateSpan.textContent = '[' + stepText + ']';
-            stateSpan.title = 'state: ' + actor.currentState
-                + (actor.stepIndex !== undefined ? ', step ' + actor.stepIndex : '')
-                + (actor.stepLabel ? ', label: ' + actor.stepLabel : '')
-                + (actor.stepNote ? ', note: ' + actor.stepNote : '');
-            node.appendChild(stateSpan);
-        }
-
         // Milestone message display
         if (actor.milestoneMessage) {
             var msSpan = document.createElement('span');
@@ -1237,17 +1214,7 @@
             html += '<div class="actor-section-label">Status</div>';
             html += '<div class="actor-detail-value">' + escapeHtml(actor.status || 'IDLE') + '</div>';
             if (actor.currentState) {
-                html += '<div class="actor-detail-value">State: <code>' + escapeHtml(actor.currentState) + '</code>';
-                if (actor.stepIndex !== undefined && actor.stepIndex !== null) {
-                    html += ' (step ' + actor.stepIndex + (actor.totalSteps ? ' / ' + actor.totalSteps : '') + ')';
-                }
-                html += '</div>';
-            }
-            if (actor.stepLabel) {
-                html += '<div class="actor-detail-value">Label: ' + escapeHtml(actor.stepLabel) + '</div>';
-            }
-            if (actor.stepNote) {
-                html += '<div class="actor-detail-value">Note: ' + escapeHtml(actor.stepNote) + '</div>';
+                html += '<div class="actor-detail-value">State: <code>' + escapeHtml(actor.currentState) + '</code></div>';
             }
             if (actor.workflowFile) {
                 html += '<div class="actor-detail-value">Workflow: ' + escapeHtml(actor.workflowFile) + '</div>';

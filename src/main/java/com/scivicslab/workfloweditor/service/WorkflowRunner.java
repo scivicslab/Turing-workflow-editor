@@ -110,41 +110,10 @@ public class WorkflowRunner {
         info.put("isInterpreter", isInterpreter);
 
         if (isInterpreter) {
-            // Extract current state and step details from the wrapped Interpreter
             Interpreter interp = getInterpreterObject(actor);
             if (interp != null) {
-                String currentState = interp.getCurrentState();
-                info.put("currentState", currentState);
+                info.put("currentState", interp.getCurrentState());
                 info.put("workflowFile", getInterpreterWorkflowFile(actor));
-
-                // Extract step details from loaded workflow
-                if (interp.hasCodeLoaded()) {
-                    var transitions = interp.getCode().getTransitions();
-                    info.put("totalSteps", transitions.size());
-                    // Find current step: transition whose from-state matches currentState
-                    for (int i = 0; i < transitions.size(); i++) {
-                        var tr = transitions.get(i);
-                        var states = tr.getStates();
-                        if (states.size() >= 1 && states.get(0).equals(currentState)) {
-                            info.put("stepIndex", i);
-                            String label = tr.getLabel();
-                            if (label != null && !label.isEmpty()) info.put("stepLabel", label);
-                            // Try to get note via reflection (may not exist in all versions)
-                            try {
-                                var noteMethod = tr.getClass().getMethod("getNote");
-                                Object note = noteMethod.invoke(tr);
-                                if (note != null && !note.toString().isEmpty()) {
-                                    info.put("stepNote", note.toString());
-                                }
-                            } catch (NoSuchMethodException e) {
-                                // note not available in this version
-                            } catch (Exception e) {
-                                // ignore
-                            }
-                            break;
-                        }
-                    }
-                }
             }
         }
 
