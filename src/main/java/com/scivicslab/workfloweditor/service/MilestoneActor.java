@@ -4,6 +4,7 @@ import com.scivicslab.pojoactor.core.Action;
 import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
+import org.json.JSONArray;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -63,13 +64,23 @@ public class MilestoneActor extends IIActorRef<MilestoneActor> {
 
     @Action("report")
     public ActionResult report(String args) {
-        latestMessage = args;
-        history.add(new MilestoneEntry(args, Instant.now()));
+        // args comes as JSON array string e.g. '["message"]' from interpreter
+        String message = args;
+        try {
+            JSONArray arr = new JSONArray(args);
+            if (arr.length() > 0) {
+                message = arr.getString(0);
+            }
+        } catch (Exception e) {
+            // Not JSON array - use as-is
+        }
+        latestMessage = message;
+        history.add(new MilestoneEntry(message, Instant.now()));
         var listener = this.outputListener;
         if (listener != null) {
-            listener.accept("[milestone] " + args);
+            listener.accept("[milestone] " + message);
         }
-        return new ActionResult(true, args);
+        return new ActionResult(true, message);
     }
 
     private record MilestoneEntry(String message, Instant timestamp) {}

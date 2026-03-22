@@ -465,6 +465,7 @@ main {
 .tree-node {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     padding: 3px 8px 3px 0;
     cursor: pointer;
     white-space: nowrap;
@@ -522,6 +523,16 @@ main {
     margin-left: 4px;
     font-size: 10px;
     color: var(--text-secondary);
+}
+
+.tree-node-milestone {
+    width: 100%;
+    padding-left: 28px;
+    font-size: 10px;
+    color: var(--accent-yellow);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .tree-resizer {

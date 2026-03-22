@@ -54,7 +54,9 @@ public class WorkflowRunner {
                 .loggerName("workflow")
                 .team(system)
                 .build();
-        system.addIIActor(new InterpreterIIAR(DEFAULT_INTERPRETER_NAME, defaultInterp, system));
+        InterpreterIIAR interpActor = new InterpreterIIAR(DEFAULT_INTERPRETER_NAME, defaultInterp, system);
+        system.addIIActor(interpActor);
+        defaultInterp.setSelfActorRef(interpActor);
         currentInterpreter = defaultInterp;
     }
 

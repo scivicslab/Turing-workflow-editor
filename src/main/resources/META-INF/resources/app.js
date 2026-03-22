@@ -1169,13 +1169,13 @@
             node.appendChild(statusSpan);
         }
 
-        // Milestone message display
+        // Milestone message display (below the actor name)
         if (actor.milestoneMessage) {
-            var msSpan = document.createElement('span');
-            msSpan.className = 'tree-node-state';
-            msSpan.textContent = actor.milestoneMessage;
-            msSpan.style.color = 'var(--accent-yellow)';
-            node.appendChild(msSpan);
+            var msDiv = document.createElement('div');
+            msDiv.className = 'tree-node-milestone';
+            msDiv.textContent = actor.milestoneMessage;
+            msDiv.title = actor.milestoneMessage;
+            node.appendChild(msDiv);
         }
 
         // Click to select
