@@ -21,10 +21,7 @@
         return infiniteCheck.checked ? 2147483647 : (parseInt(maxIterationsInput.value, 10) || 100);
     }
 
-    var actorsBtn = document.getElementById('actorsBtn');
-    var actorPanel = document.getElementById('actorPanel');
-    var actorPanelClose = document.getElementById('actorPanelClose');
-    var actorPanelBody = document.getElementById('actorPanelBody');
+    // (actor panel removed - merged into Actor Tree)
     var themeSelect = document.getElementById('themeSelect');
 
     var tabList = document.getElementById('tabList');
@@ -117,6 +114,11 @@
             try {
                 console.log('SSE received:', e.data);
                 var event = JSON.parse(e.data);
+                // Handle actor-tree events for the tree panel
+                if (event.type === 'actor-tree') {
+                    handleActorTreeEvent(event);
+                    return;
+                }
                 appendLog(event.type, event.message);
 
                 // Highlight the step currently being executed
@@ -917,74 +919,7 @@
 
     // --- Actor Panel ---
 
-    actorsBtn.addEventListener('click', function () {
-        actorPanel.style.display = actorPanel.style.display === 'none' ? 'flex' : 'none';
-        if (actorPanel.style.display === 'flex') loadActorTree();
-    });
-
-    actorPanelClose.addEventListener('click', function () {
-        actorPanel.style.display = 'none';
-    });
-
-    function loadActorTree() {
-        actorPanelBody.innerHTML = '<div style="color:var(--text-secondary)">Loading...</div>';
-        fetch('/api/actors').then(function (res) {
-            return res.json();
-        }).then(function (actors) {
-            actorPanelBody.innerHTML = '';
-            if (actors.length === 0) {
-                actorPanelBody.innerHTML = '<div style="color:var(--text-secondary)">No actors registered</div>';
-                return;
-            }
-            actors.forEach(function (actor) {
-                var card = document.createElement('div');
-                card.className = 'actor-card';
-
-                var header = '<div class="actor-card-header">' +
-                    '<span class="actor-name">' + escapeAttr(actor.name) + '</span>' +
-                    '<span class="actor-type">' + escapeAttr(actor.type) + '</span>' +
-                    '</div>';
-
-                var body = '<div class="actor-card-body">';
-
-                if (actor.actions && actor.actions.length > 0) {
-                    body += '<div class="actor-section-label">Actions</div>';
-                    body += '<div class="actor-actions-list">';
-                    actor.actions.forEach(function (action) {
-                        var actionName = typeof action === 'string' ? action : action.name;
-                        var javadocUrl = typeof action === 'object' ? action.javadocUrl : null;
-                        if (javadocUrl) {
-                            body += '<a class="actor-action-tag actor-action-link" href="' + escapeAttr(javadocUrl) + '" target="_blank" title="Open Javadoc">' + escapeAttr(actionName) + '</a>';
-                        } else {
-                            body += '<span class="actor-action-tag">' + escapeAttr(actionName) + '</span>';
-                        }
-                    });
-                    body += '</div>';
-                }
-
-                if (actor.children && actor.children.length > 0) {
-                    body += '<div class="actor-section-label">Children</div>';
-                    body += '<div class="actor-children-list">';
-                    actor.children.forEach(function (child) {
-                        body += '<span class="actor-child-name">' + escapeAttr(child) + '</span> ';
-                    });
-                    body += '</div>';
-                }
-
-                if (actor.parent) {
-                    body += '<div class="actor-section-label">Parent</div>';
-                    body += '<div style="font-size:12px;color:var(--text-secondary)">' + escapeAttr(actor.parent) + '</div>';
-                }
-
-                body += '</div>';
-
-                card.innerHTML = header + body;
-                actorPanelBody.appendChild(card);
-            });
-        }).catch(function (err) {
-            actorPanelBody.innerHTML = '<div style="color:var(--accent-red)">Error: ' + err.message + '</div>';
-        });
-    }
+    // (old actor panel code removed - merged into Actor Tree)
 
     // --- Sync with server state ---
 
@@ -1036,6 +971,552 @@
         appendLog('info', 'Applied delay ' + val + 'ms to all ' + delayInputs.length + ' steps');
         saveToLocalStorage();
     });
+
+    // --- Actor Tree Browser ---
+
+    var treeBtn = document.getElementById('treeBtn');
+    var pluginsBtn = document.getElementById('pluginsBtn');
+    var workflowsBtn = document.getElementById('workflowsBtn');
+    var sidePanel = document.getElementById('sidePanel');
+    var sidePanelClose = document.getElementById('sidePanelClose');
+    var sidePanelRefresh = document.getElementById('sidePanelRefresh');
+    var sidePanelResizer = document.getElementById('sidePanelResizer');
+    var actorTreeBody = document.getElementById('actorTreeBody');
+    var actorDataPanel = document.getElementById('actorDataPanel');
+    var actorDataTitle = document.getElementById('actorDataTitle');
+    var actorDataContent = document.getElementById('actorDataContent');
+    var pluginsBody = document.getElementById('pluginsBody');
+    var workflowsBody = document.getElementById('workflowsBody');
+    var selectedActorName = null;
+    var actorTreeData = [];
+    var treeCollapsed = {};
+
+    var activeSideTab = 'actors';
+    var sideTabs = document.querySelectorAll('.side-tab');
+
+    function showSidePanel(tab) {
+        var wasHidden = sidePanel.style.display === 'none';
+        var sameTab = activeSideTab === tab && !wasHidden;
+
+        if (sameTab) {
+            // Toggle off
+            sidePanel.style.display = 'none';
+            sidePanelResizer.style.display = 'none';
+            stopActorTreePolling();
+            return;
+        }
+
+        activeSideTab = tab;
+        sidePanel.style.display = 'flex';
+        sidePanelResizer.style.display = 'block';
+
+        // Update tab highlights
+        for (var i = 0; i < sideTabs.length; i++) {
+            sideTabs[i].classList.toggle('active', sideTabs[i].getAttribute('data-tab') === tab);
+        }
+
+        // Show correct view
+        document.getElementById('sidePanelActors').style.display = tab === 'actors' ? 'flex' : 'none';
+        document.getElementById('sidePanelPlugins').style.display = tab === 'plugins' ? 'flex' : 'none';
+        document.getElementById('sidePanelWorkflows').style.display = tab === 'workflows' ? 'flex' : 'none';
+
+        // Fetch data and manage polling
+        if (tab === 'actors') {
+            fetchActorTree();
+            startActorTreePolling();
+        } else {
+            stopActorTreePolling();
+            if (tab === 'plugins') fetchPlugins();
+            else if (tab === 'workflows') fetchWorkflows();
+        }
+    }
+
+    treeBtn.addEventListener('click', function () { showSidePanel('actors'); });
+    pluginsBtn.addEventListener('click', function () { showSidePanel('plugins'); });
+    workflowsBtn.addEventListener('click', function () { showSidePanel('workflows'); });
+    sidePanelClose.addEventListener('click', function () {
+        sidePanel.style.display = 'none';
+        sidePanelResizer.style.display = 'none';
+        stopActorTreePolling();
+    });
+    sidePanelRefresh.addEventListener('click', function () {
+        if (activeSideTab === 'actors') fetchActorTree();
+        else if (activeSideTab === 'plugins') fetchPlugins();
+        else if (activeSideTab === 'workflows') fetchWorkflows();
+    });
+
+    // Tab clicks within the header
+    for (var ti = 0; ti < sideTabs.length; ti++) {
+        sideTabs[ti].addEventListener('click', (function (tab) {
+            return function () { showSidePanel(tab); };
+        })(sideTabs[ti].getAttribute('data-tab')));
+    }
+
+    // Auto-polling: refresh actor tree every 2s while Actors tab is visible
+    var actorTreePollTimer = null;
+
+    function startActorTreePolling() {
+        stopActorTreePolling();
+        actorTreePollTimer = setInterval(function () {
+            if (sidePanel.style.display !== 'none' && activeSideTab === 'actors') {
+                fetchActorTree();
+            } else {
+                stopActorTreePolling();
+            }
+        }, 2000);
+    }
+
+    function stopActorTreePolling() {
+        if (actorTreePollTimer) {
+            clearInterval(actorTreePollTimer);
+            actorTreePollTimer = null;
+        }
+    }
+
+    function fetchActorTree() {
+        fetch('/api/actors/tree').then(function (r) { return r.json(); }).then(function (data) {
+            actorTreeData = data;
+            renderActorTree(data);
+            // Re-select the actor to update detail panel if one is selected
+            if (selectedActorName) {
+                for (var i = 0; i < data.length; i++) {
+                    if (data[i].name === selectedActorName) {
+                        selectActorDetail(data[i]);
+                        break;
+                    }
+                }
+            }
+        }).catch(function () {});
+    }
+
+    function buildTreeHierarchy(flatList) {
+        // Build a map and find roots (parent == null or parent == "ROOT" or parent not in map)
+        var map = {};
+        for (var i = 0; i < flatList.length; i++) {
+            map[flatList[i].name] = flatList[i];
+        }
+        var roots = [];
+        for (var j = 0; j < flatList.length; j++) {
+            var item = flatList[j];
+            var parentName = item.parent;
+            if (!parentName || parentName === 'ROOT' || !map[parentName]) {
+                roots.push(item);
+            }
+        }
+        return { roots: roots, map: map };
+    }
+
+    function renderActorTree(data) {
+        actorTreeBody.innerHTML = '';
+        var hier = buildTreeHierarchy(data);
+        for (var i = 0; i < hier.roots.length; i++) {
+            renderTreeNode(hier.roots[i], hier.map, 0, actorTreeBody);
+        }
+    }
+
+    function renderTreeNode(actor, map, depth, container) {
+        var hasChildren = actor.children && actor.children.length > 0;
+        var collapsed = treeCollapsed[actor.name];
+
+        var node = document.createElement('div');
+        node.className = 'tree-node' + (actor.name === selectedActorName ? ' selected' : '');
+        node.setAttribute('data-actor', actor.name);
+
+        // Indentation
+        for (var i = 0; i < depth; i++) {
+            var indent = document.createElement('span');
+            indent.className = 'tree-node-indent';
+            node.appendChild(indent);
+        }
+
+        // Toggle arrow
+        var toggle = document.createElement('span');
+        toggle.className = 'tree-node-toggle';
+        if (hasChildren) {
+            toggle.textContent = collapsed ? '\u25B6' : '\u25BC';
+            toggle.addEventListener('click', (function (name) {
+                return function (e) {
+                    e.stopPropagation();
+                    treeCollapsed[name] = !treeCollapsed[name];
+                    renderActorTree(actorTreeData);
+                };
+            })(actor.name));
+        }
+        node.appendChild(toggle);
+
+        // Icon
+        var icon = document.createElement('span');
+        icon.className = 'tree-node-icon';
+        icon.textContent = actor.isInterpreter ? '\u25A0' : '\u25CB';
+        node.appendChild(icon);
+
+        // Name
+        var nameSpan = document.createElement('span');
+        nameSpan.className = 'tree-node-name';
+        nameSpan.textContent = actor.name;
+        if (actor.isInterpreter && actor.workflowFile) {
+            nameSpan.textContent += ' (' + actor.workflowFile + ')';
+        }
+        node.appendChild(nameSpan);
+
+        // Status badge
+        if (actor.isInterpreter && actor.status) {
+            var statusSpan = document.createElement('span');
+            var statusClass = actor.status.toLowerCase();
+            statusSpan.className = 'tree-node-status ' + statusClass;
+            statusSpan.textContent = actor.status === 'RUNNING' ? '\u25CF' : actor.status === 'COMPLETED' ? '\u25CB' : '\u25A0';
+            statusSpan.title = actor.status;
+            node.appendChild(statusSpan);
+        }
+
+        // Current step info for interpreters
+        if (actor.isInterpreter && actor.currentState) {
+            var stateSpan = document.createElement('span');
+            stateSpan.className = 'tree-node-state';
+            // Show note > label > step index > raw state
+            var stepText = '';
+            if (actor.stepNote) {
+                stepText = actor.stepNote;
+            } else if (actor.stepLabel) {
+                stepText = actor.stepLabel;
+            } else if (actor.stepIndex !== undefined && actor.stepIndex !== null) {
+                stepText = 'step ' + actor.stepIndex + (actor.totalSteps ? '/' + actor.totalSteps : '');
+            } else {
+                stepText = actor.currentState;
+            }
+            stateSpan.textContent = '[' + stepText + ']';
+            stateSpan.title = 'state: ' + actor.currentState
+                + (actor.stepIndex !== undefined ? ', step ' + actor.stepIndex : '')
+                + (actor.stepLabel ? ', label: ' + actor.stepLabel : '')
+                + (actor.stepNote ? ', note: ' + actor.stepNote : '');
+            node.appendChild(stateSpan);
+        }
+
+        // Milestone message display
+        if (actor.milestoneMessage) {
+            var msSpan = document.createElement('span');
+            msSpan.className = 'tree-node-state';
+            msSpan.textContent = actor.milestoneMessage;
+            msSpan.style.color = 'var(--accent-yellow)';
+            node.appendChild(msSpan);
+        }
+
+        // Click to select
+        node.addEventListener('click', (function (a) {
+            return function () { selectActor(a); };
+        })(actor));
+
+        container.appendChild(node);
+
+        // Render children if not collapsed
+        if (hasChildren && !collapsed) {
+            for (var c = 0; c < actor.children.length; c++) {
+                var childName = actor.children[c];
+                if (map[childName]) {
+                    renderTreeNode(map[childName], map, depth + 1, container);
+                }
+            }
+        }
+    }
+
+    function selectActor(actor) {
+        selectedActorName = actor.name;
+        renderActorTree(actorTreeData);
+        selectActorDetail(actor);
+    }
+
+    function selectActorDetail(actor) {
+        actorDataPanel.style.display = 'block';
+        actorDataTitle.textContent = actor.name + ' (' + actor.type + ')';
+
+        var html = '';
+
+        // Status info for interpreters
+        if (actor.isInterpreter) {
+            html += '<div class="actor-detail-section">';
+            html += '<div class="actor-section-label">Status</div>';
+            html += '<div class="actor-detail-value">' + escapeHtml(actor.status || 'IDLE') + '</div>';
+            if (actor.currentState) {
+                html += '<div class="actor-detail-value">State: <code>' + escapeHtml(actor.currentState) + '</code>';
+                if (actor.stepIndex !== undefined && actor.stepIndex !== null) {
+                    html += ' (step ' + actor.stepIndex + (actor.totalSteps ? ' / ' + actor.totalSteps : '') + ')';
+                }
+                html += '</div>';
+            }
+            if (actor.stepLabel) {
+                html += '<div class="actor-detail-value">Label: ' + escapeHtml(actor.stepLabel) + '</div>';
+            }
+            if (actor.stepNote) {
+                html += '<div class="actor-detail-value">Note: ' + escapeHtml(actor.stepNote) + '</div>';
+            }
+            if (actor.workflowFile) {
+                html += '<div class="actor-detail-value">Workflow: ' + escapeHtml(actor.workflowFile) + '</div>';
+            }
+            html += '</div>';
+        }
+
+        // Milestone history
+        if (actor.milestoneHistory && actor.milestoneHistory.length > 0) {
+            html += '<div class="actor-detail-section">';
+            html += '<div class="actor-section-label">Milestones</div>';
+            for (var m = 0; m < actor.milestoneHistory.length; m++) {
+                var entry = actor.milestoneHistory[m];
+                var ts = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
+                html += '<div class="actor-detail-value" style="font-size:11px;">';
+                html += '<span style="color:var(--text-secondary)">' + escapeHtml(ts) + '</span> ';
+                html += escapeHtml(entry.message);
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+
+        // Actions (methods)
+        if (actor.actions && actor.actions.length > 0) {
+            html += '<div class="actor-detail-section">';
+            html += '<div class="actor-section-label">Actions</div>';
+            html += '<div class="actor-actions-list">';
+            for (var i = 0; i < actor.actions.length; i++) {
+                var action = actor.actions[i];
+                var actionName = typeof action === 'string' ? action : action.name;
+                var javadocUrl = typeof action === 'object' ? action.javadocUrl : null;
+                if (javadocUrl) {
+                    html += '<a class="actor-action-tag actor-action-link" href="' + escapeHtml(javadocUrl) + '" target="_blank" title="Javadoc">' + escapeHtml(actionName) + '</a>';
+                } else {
+                    html += '<span class="actor-action-tag">' + escapeHtml(actionName) + '</span>';
+                }
+            }
+            html += '</div></div>';
+        }
+
+        // Children
+        if (actor.children && actor.children.length > 0) {
+            html += '<div class="actor-detail-section">';
+            html += '<div class="actor-section-label">Children</div>';
+            html += '<div class="actor-detail-value">' + actor.children.map(escapeHtml).join(', ') + '</div>';
+            html += '</div>';
+        }
+
+        // Parent
+        if (actor.parent) {
+            html += '<div class="actor-detail-section">';
+            html += '<div class="actor-section-label">Parent</div>';
+            html += '<div class="actor-detail-value">' + escapeHtml(actor.parent) + '</div>';
+            html += '</div>';
+        }
+
+        actorDataContent.innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Handle actor-tree SSE events
+    function handleActorTreeEvent(event) {
+        if (event.type === 'actor-tree' && event.data && event.data.actors) {
+            actorTreeData = event.data.actors;
+            if (sidePanel.style.display !== 'none' && activeSideTab === 'actors') {
+                renderActorTree(actorTreeData);
+                // Update detail panel for selected actor
+                if (selectedActorName) {
+                    for (var i = 0; i < actorTreeData.length; i++) {
+                        if (actorTreeData[i].name === selectedActorName) {
+                            selectActorDetail(actorTreeData[i]);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Plugins Browser ---
+
+    function fetchPlugins() {
+        fetch('/api/plugins/available').then(function (r) { return r.json(); }).then(function (data) {
+            renderPlugins(data);
+        }).catch(function () {
+            pluginsBody.innerHTML = '<div style="padding:10px;color:var(--text-secondary);">Failed to load plugins</div>';
+        });
+    }
+
+    function renderPlugins(plugins) {
+        pluginsBody.innerHTML = '';
+        if (plugins.length === 0) {
+            pluginsBody.innerHTML = '<div style="padding:10px;color:var(--text-secondary);">No plugins found in ~/.m2/repository</div>';
+            return;
+        }
+        for (var i = 0; i < plugins.length; i++) {
+            var p = plugins[i];
+            var item = document.createElement('div');
+            item.className = 'browse-item';
+
+            var icon = document.createElement('span');
+            icon.className = 'browse-item-icon';
+            icon.textContent = '\u25A3'; // filled square with border
+            item.appendChild(icon);
+
+            var name = document.createElement('span');
+            name.className = 'browse-item-name';
+            name.textContent = p.artifactId;
+            name.title = p.coordinate;
+            item.appendChild(name);
+
+            var meta = document.createElement('span');
+            meta.className = 'browse-item-meta';
+            meta.textContent = p.latestVersion || '';
+            item.appendChild(meta);
+
+            var actions = document.createElement('span');
+            actions.className = 'browse-item-actions';
+            var loadBtn = document.createElement('button');
+            loadBtn.textContent = 'Load';
+            loadBtn.title = 'Load JAR into actor system';
+            loadBtn.addEventListener('click', (function (plugin) {
+                return function (e) {
+                    e.stopPropagation();
+                    loadPlugin(plugin);
+                };
+            })(p));
+            actions.appendChild(loadBtn);
+            item.appendChild(actions);
+
+            pluginsBody.appendChild(item);
+        }
+    }
+
+    function loadPlugin(plugin) {
+        if (!plugin.latestJar) {
+            appendLog('error', 'No JAR found for ' + plugin.artifactId);
+            return;
+        }
+        appendLog('info', 'Loading plugin: ' + plugin.coordinate + '...');
+        fetch('/api/loader/load-jar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: plugin.latestJar })
+        }).then(function (r) { return r.json(); }).then(function (result) {
+            if (result.status === 'ok') {
+                appendLog('info', 'Plugin loaded: ' + plugin.artifactId + ' - ' + result.result);
+            } else {
+                appendLog('error', 'Failed to load plugin: ' + (result.message || result.result));
+            }
+        }).catch(function (err) {
+            appendLog('error', 'Failed to load plugin: ' + err.message);
+        });
+    }
+
+    // --- Workflows Browser ---
+
+    function fetchWorkflows() {
+        fetch('/api/workflows/available').then(function (r) { return r.json(); }).then(function (data) {
+            renderWorkflows(data);
+        }).catch(function () {
+            workflowsBody.innerHTML = '<div style="padding:10px;color:var(--text-secondary);">Failed to load workflows</div>';
+        });
+    }
+
+    function renderWorkflows(workflows) {
+        workflowsBody.innerHTML = '';
+        if (workflows.length === 0) {
+            workflowsBody.innerHTML = '<div style="padding:10px;color:var(--text-secondary);">No workflow files found</div>';
+            return;
+        }
+
+        // Group by project
+        var groups = {};
+        for (var i = 0; i < workflows.length; i++) {
+            var wf = workflows[i];
+            var proj = wf.project || 'unknown';
+            if (!groups[proj]) groups[proj] = [];
+            groups[proj].push(wf);
+        }
+
+        var projNames = Object.keys(groups).sort();
+        for (var g = 0; g < projNames.length; g++) {
+            var projName = projNames[g];
+            var label = document.createElement('div');
+            label.className = 'browse-group-label';
+            label.textContent = projName;
+            workflowsBody.appendChild(label);
+
+            var items = groups[projName];
+            for (var j = 0; j < items.length; j++) {
+                var w = items[j];
+                var item = document.createElement('div');
+                item.className = 'browse-item';
+
+                var icon = document.createElement('span');
+                icon.className = 'browse-item-icon';
+                icon.textContent = '\u25B7'; // triangle
+                item.appendChild(icon);
+
+                var name = document.createElement('span');
+                name.className = 'browse-item-name';
+                name.textContent = w.name;
+                name.title = w.path;
+                item.appendChild(name);
+
+                var meta = document.createElement('span');
+                meta.className = 'browse-item-meta';
+                meta.textContent = w.file;
+                item.appendChild(meta);
+
+                var actions = document.createElement('span');
+                actions.className = 'browse-item-actions';
+                var openBtn = document.createElement('button');
+                openBtn.textContent = 'Open';
+                openBtn.title = 'Load workflow into editor';
+                openBtn.addEventListener('click', (function (workflow) {
+                    return function (e) {
+                        e.stopPropagation();
+                        openWorkflow(workflow);
+                    };
+                })(w));
+                actions.appendChild(openBtn);
+                item.appendChild(actions);
+
+                workflowsBody.appendChild(item);
+            }
+        }
+    }
+
+    function openWorkflow(workflow) {
+        appendLog('info', 'Loading workflow: ' + workflow.name + ' from ' + workflow.path + '...');
+        fetch('/api/workflows/load', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: workflow.path })
+        }).then(function (r) { return r.json(); }).then(function (result) {
+            if (result.status === 'ok') {
+                appendLog('info', 'Workflow loaded: ' + result.name + ' (' + result.stepCount + ' steps)');
+                // Reload editor with new workflow
+                loadFromServer();
+            } else {
+                appendLog('error', 'Failed to load workflow: ' + result.message);
+            }
+        }).catch(function (err) {
+            appendLog('error', 'Failed to load workflow: ' + err.message);
+        });
+    }
+
+    // Tree panel horizontal resizer
+    (function () {
+        var isResizing = false;
+        sidePanelResizer.addEventListener('mousedown', function (e) {
+            isResizing = true;
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', function (e) {
+            if (!isResizing) return;
+            var newWidth = e.clientX;
+            if (newWidth < 160) newWidth = 160;
+            if (newWidth > 500) newWidth = 500;
+            sidePanel.style.width = newWidth + 'px';
+        });
+        document.addEventListener('mouseup', function () { isResizing = false; });
+    })();
 
     // --- Initialize ---
 

@@ -223,5 +223,11 @@ public class WorkflowResource {
     public record MatrixRow(String from, String to, String actor, String method, String arguments) {}
 
     @RegisterForReflection
-    public record WorkflowEvent(String type, String message, String state, String action) {}
+    public record WorkflowEvent(String type, String message, String state, String action,
+                                String actorName, Map<String, Object> data) {
+        /** Backward-compatible constructor for existing call sites. */
+        public WorkflowEvent(String type, String message, String state, String action) {
+            this(type, message, state, action, null, null);
+        }
+    }
 }

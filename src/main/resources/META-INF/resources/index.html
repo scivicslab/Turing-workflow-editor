@@ -35,52 +35,74 @@
         </div>
     </header>
     <main>
-        <section class="editor-section">
-            <div class="tab-bar">
-                <div id="tabList" class="tab-list"></div>
-                <button id="addTabBtn" class="btn btn-small tab-add-btn" title="New workflow tab">+</button>
+        <section id="sidePanel" class="actor-tree-panel" style="display:none;">
+            <div class="actor-tree-header">
+                <span class="side-tab" data-tab="actors">Actors</span>
+                <span class="side-tab" data-tab="plugins">Plugins</span>
+                <span class="side-tab" data-tab="workflows">Workflows</span>
+                <button id="sidePanelRefresh" class="btn btn-small" title="Refresh">&#8635;</button>
+                <button id="sidePanelClose" class="btn btn-small">&times;</button>
             </div>
-            <div class="toolbar">
-                <button id="addStepBtn" class="btn btn-small">+ Step</button>
-                <button id="actorsBtn" class="btn btn-small">Actors</button>
-                <button id="exportYamlBtn" class="btn btn-small">Export YAML</button>
-                <button id="importYamlBtn" class="btn btn-small">Import YAML</button>
-            </div>
-            <div class="description-section">
-                <textarea id="workflowDescription" placeholder="Workflow description (optional)" rows="1"></textarea>
-            </div>
-            <div class="table-wrapper">
-                <div id="stepsContainer"></div>
-            </div>
-        </section>
-        <div id="logResizer" class="log-resizer"></div>
-        <section class="log-section">
-            <div class="log-header">
-                <span>Execution Log</span>
-                <div class="log-header-controls">
-                    <select id="logLevelSelect">
-                        <option value="OFF" selected>OFF</option>
-                        <option value="SEVERE">SEVERE</option>
-                        <option value="WARNING">WARNING</option>
-                        <option value="INFO">INFO</option>
-                        <option value="FINE">FINE</option>
-                        <option value="FINER">FINER</option>
-                        <option value="FINEST">FINEST</option>
-                        <option value="ALL">ALL</option>
-                    </select>
-                    <button id="clearLogBtn" class="btn btn-small">Clear</button>
+            <div id="sidePanelActors" class="side-panel-view">
+                <div id="actorTreeBody" class="actor-tree-body"></div>
+                <div id="actorDataPanel" class="actor-data-panel" style="display:none;">
+                    <div class="actor-data-header">
+                        <span id="actorDataTitle">Actor Data</span>
+                    </div>
+                    <pre id="actorDataContent" class="actor-data-content"></pre>
                 </div>
             </div>
-            <div id="logOutput" class="log-output"></div>
+            <div id="sidePanelPlugins" class="side-panel-view" style="display:none;">
+                <div id="pluginsBody" class="actor-tree-body"></div>
+            </div>
+            <div id="sidePanelWorkflows" class="side-panel-view" style="display:none;">
+                <div id="workflowsBody" class="actor-tree-body"></div>
+            </div>
         </section>
-    </main>
-    <div id="actorPanel" class="actor-panel" style="display:none;">
-        <div class="actor-panel-header">
-            <span>Registered Actors</span>
-            <button id="actorPanelClose" class="btn btn-small">&times;</button>
+        <div id="sidePanelResizer" class="tree-resizer" style="display:none;"></div>
+        <div class="editor-and-log">
+            <section class="editor-section">
+                <div class="tab-bar">
+                    <div id="tabList" class="tab-list"></div>
+                    <button id="addTabBtn" class="btn btn-small tab-add-btn" title="New workflow tab">+</button>
+                </div>
+                <div class="toolbar">
+                    <button id="addStepBtn" class="btn btn-small">+ Step</button>
+                    <button id="treeBtn" class="btn btn-small" title="Actor Tree">Actor Tree</button>
+                    <button id="pluginsBtn" class="btn btn-small" title="Available Plugins">Plugins</button>
+                    <button id="workflowsBtn" class="btn btn-small" title="Available Workflows">Workflows</button>
+                    <button id="exportYamlBtn" class="btn btn-small">Export YAML</button>
+                    <button id="importYamlBtn" class="btn btn-small">Import YAML</button>
+                </div>
+                <div class="description-section">
+                    <textarea id="workflowDescription" placeholder="Workflow description (optional)" rows="1"></textarea>
+                </div>
+                <div class="table-wrapper">
+                    <div id="stepsContainer"></div>
+                </div>
+            </section>
+            <div id="logResizer" class="log-resizer"></div>
+            <section class="log-section">
+                <div class="log-header">
+                    <span>Execution Log</span>
+                    <div class="log-header-controls">
+                        <select id="logLevelSelect">
+                            <option value="OFF" selected>OFF</option>
+                            <option value="SEVERE">SEVERE</option>
+                            <option value="WARNING">WARNING</option>
+                            <option value="INFO">INFO</option>
+                            <option value="FINE">FINE</option>
+                            <option value="FINER">FINER</option>
+                            <option value="FINEST">FINEST</option>
+                            <option value="ALL">ALL</option>
+                        </select>
+                        <button id="clearLogBtn" class="btn btn-small">Clear</button>
+                    </div>
+                </div>
+                <div id="logOutput" class="log-output"></div>
+            </section>
         </div>
-        <div id="actorPanelBody" class="actor-panel-body"></div>
-    </div>
+    </main>
     <script src="app.js"></script>
 </body>
 </html>
