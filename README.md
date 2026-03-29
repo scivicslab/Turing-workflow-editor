@@ -1,4 +1,5 @@
 [![Javadoc](https://img.shields.io/badge/javadoc-1.0.0-brightgreen.svg)](https://scivicslab.github.io/Turing-workflow-editor/apidocs/)
+[![Sponsor](https://img.shields.io/github/sponsors/scivicslab)](https://github.com/sponsors/scivicslab)
 
 # Turing Workflow Editor
 
