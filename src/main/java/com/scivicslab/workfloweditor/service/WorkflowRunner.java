@@ -5,6 +5,7 @@ import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.Interpreter;
+import com.scivicslab.turingworkflow.workflow.InterpreterIIAR;
 import com.scivicslab.workfloweditor.rest.WorkflowResource.MatrixRow;
 import com.scivicslab.workfloweditor.rest.WorkflowResource.WorkflowEvent;
 import io.quarkus.runtime.annotations.RegisterForReflection;
@@ -33,6 +34,8 @@ public class WorkflowRunner {
 
     private static final Logger logger = Logger.getLogger(WorkflowRunner.class.getName());
 
+    private static final String DEFAULT_INTERPRETER_NAME = "interpreter";
+
     private IIActorSystem system;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile boolean stopRequested = false;
@@ -44,6 +47,17 @@ public class WorkflowRunner {
         system.addIIActor(new LogActor("log", system));
         system.addIIActor(new ShellActor("shell", system));
         system.addIIActor(new LoaderActor("loader", system));
+        system.addIIActor(new MilestoneActor("milestone", system));
+
+        // Create default interpreter actor - the editor UI is bound to this interpreter
+        Interpreter defaultInterp = new Interpreter.Builder()
+                .loggerName("workflow")
+                .team(system)
+                .build();
+        InterpreterIIAR interpActor = new InterpreterIIAR(DEFAULT_INTERPRETER_NAME, defaultInterp, system);
+        system.addIIActor(interpActor);
+        defaultInterp.setSelfActorRef(interpActor);
+        currentInterpreter = defaultInterp;
     }
 
     public IIActorSystem getSystem() {
@@ -93,6 +107,35 @@ public class WorkflowRunner {
         info.put("type", actor.getClass().getSimpleName());
         info.put("parent", actor.getParentName());
 
+        // Detect if this actor wraps an Interpreter
+        boolean isInterpreter = actor.getClass().getSimpleName().equals("InterpreterIIAR");
+        info.put("isInterpreter", isInterpreter);
+
+        if (isInterpreter) {
+            Interpreter interp = getInterpreterObject(actor);
+            if (interp != null) {
+                info.put("currentState", interp.getCurrentState());
+                info.put("workflowFile", getInterpreterWorkflowFile(actor));
+            }
+        }
+
+        // Milestone actor: include latest message and history
+        if (actor instanceof MilestoneActor ms) {
+            String latest = ms.getLatestMessage();
+            if (latest != null) info.put("milestoneMessage", latest);
+            info.put("milestoneHistory", ms.getHistory());
+        }
+
+        // Determine status — for interpreters, derive from currentState
+        if (isInterpreter) {
+            String st = (String) info.get("currentState");
+            if ("end".equals(st)) info.put("status", "COMPLETED");
+            else if (running.get()) info.put("status", "RUNNING");
+            else info.put("status", "IDLE");
+        } else {
+            info.put("status", "IDLE");
+        }
+
         List<String> children = new ArrayList<>(actor.getNamesOfChildren());
         info.put("children", children);
 
@@ -104,6 +147,87 @@ public class WorkflowRunner {
         for (String childName : children) {
             if (system.hasIIActor(childName)) {
                 collectActorInfo(system.getIIActor(childName), result);
+            }
+        }
+    }
+
+    /**
+     * Extracts the wrapped Interpreter from an InterpreterIIAR actor via reflection.
+     */
+    private Interpreter getInterpreterObject(IIActorRef<?> actor) {
+        try {
+            var field = actor.getClass().getSuperclass().getSuperclass().getDeclaredField("object");
+            field.setAccessible(true);
+            Object obj = field.get(actor);
+            if (obj instanceof Interpreter interp) {
+                return interp;
+            }
+        } catch (Exception e) {
+            logger.fine("Could not get interpreter for " + actor.getName() + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Extracts the current state from an InterpreterIIAR actor via reflection.
+     */
+    private String getInterpreterState(IIActorRef<?> actor) {
+        Interpreter interp = getInterpreterObject(actor);
+        return interp != null ? interp.getCurrentState() : null;
+    }
+
+    /**
+     * Extracts the workflow file name from an InterpreterIIAR actor.
+     * Currently returns the actor name as a best-effort identifier since
+     * Interpreter does not track the loaded file name.
+     * Sub-workflow child interpreters are named "subwf-{baseName}-{timestamp}-{random}".
+     */
+    private String getInterpreterWorkflowFile(IIActorRef<?> actor) {
+        String name = actor.getName();
+        if (name != null && name.startsWith("subwf-")) {
+            // Extract base name from "subwf-{baseName}-{timestamp}-{random}"
+            String rest = name.substring(6); // remove "subwf-"
+            int dashIdx = rest.lastIndexOf('-');
+            if (dashIdx > 0) {
+                String beforeRandom = rest.substring(0, dashIdx);
+                int dashIdx2 = beforeRandom.lastIndexOf('-');
+                if (dashIdx2 > 0) {
+                    return beforeRandom.substring(0, dashIdx2) + ".yaml";
+                }
+            }
+            return rest + ".yaml";
+        }
+        return null;
+    }
+
+    /**
+     * Determines the status of an actor: RUNNING, COMPLETED, IDLE, or ERROR.
+     */
+    private String determineActorStatus(IIActorRef<?> actor, boolean isInterpreter) {
+        if (!isInterpreter) return "IDLE";
+        String state = getInterpreterState(actor);
+        if ("end".equals(state)) return "COMPLETED";
+        if (running.get()) return "RUNNING";
+        return "IDLE";
+    }
+
+    /**
+     * Emits an actor-tree snapshot as an SSE event.
+     * Called after each step execution so the frontend can update the tree in real-time.
+     */
+    private void emitActorTree(Consumer<WorkflowEvent> emitter) {
+        try {
+            List<Map<String, Object>> tree = getActorTree();
+            emitter.accept(new WorkflowEvent("actor-tree", null, null, null, null, Map.of("actors", tree)));
+        } catch (Exception e) {
+            logger.fine("Could not emit actor tree: " + e.getMessage());
+        }
+    }
+
+    private void resetMilestone() {
+        for (IIActorRef<?> actor : system.getTopLevelActors()) {
+            if (actor instanceof MilestoneActor ms) {
+                ms.reset();
             }
         }
     }
@@ -168,6 +292,7 @@ public class WorkflowRunner {
             return;
         }
         stopRequested = false;
+        resetMilestone();
 
         // Set log level for workflow logger
         var workflowLogger = java.util.logging.Logger.getLogger("workflow");
@@ -208,11 +333,9 @@ public class WorkflowRunner {
             logger.fine("Generated YAML:\n" + yaml);
             effectiveEmitter.accept(new WorkflowEvent("info", "Workflow started: " + workflowName, null, null));
 
-            Interpreter interpreter = new Interpreter.Builder()
-                    .loggerName("workflow")
-                    .team(system)
-                    .build();
-            currentInterpreter = interpreter;
+            // Reuse the default interpreter actor
+            Interpreter interpreter = currentInterpreter;
+            interpreter.reset();
 
             interpreter.setBreakpointListener((transition, state) ->
                     effectiveEmitter.accept(new WorkflowEvent("paused",
@@ -226,11 +349,13 @@ public class WorkflowRunner {
             });
 
             interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
+            emitActorTree(effectiveEmitter);
 
             int iteration = 0;
             while (iteration < maxIterations && !stopRequested) {
                 ActionResult result = interpreter.execCode();
                 String currentState = interpreter.getCurrentState();
+                emitActorTree(effectiveEmitter);
 
                 if (result == null || !result.isSuccess()) {
                     if ("end".equals(currentState)) {
@@ -264,7 +389,7 @@ public class WorkflowRunner {
             logger.log(Level.WARNING, "Workflow execution failed", e);
             effectiveEmitter.accept(new WorkflowEvent("error", "Execution failed: " + e.getMessage(), null, null));
         } finally {
-            currentInterpreter = null;
+            // Do not null out currentInterpreter - it is the default interpreter actor, reused across runs
             System.setOut(origOut);
             System.setErr(origErr);
             setOutputListeners(null);
@@ -336,6 +461,7 @@ public class WorkflowRunner {
             return;
         }
         stopRequested = false;
+        resetMilestone();
 
         // Set log level for workflow logger
         var workflowLogger = java.util.logging.Logger.getLogger("workflow");
@@ -372,11 +498,9 @@ public class WorkflowRunner {
             logger.fine("Running YAML directly:\n" + yaml);
             effectiveEmitter.accept(new WorkflowEvent("info", "Workflow started (YAML)", null, null));
 
-            Interpreter interpreter = new Interpreter.Builder()
-                    .loggerName("workflow")
-                    .team(system)
-                    .build();
-            currentInterpreter = interpreter;
+            // Reuse the default interpreter actor
+            Interpreter interpreter = currentInterpreter;
+            interpreter.reset();
 
             interpreter.setBreakpointListener((transition, state) ->
                     effectiveEmitter.accept(new WorkflowEvent("paused",
@@ -390,6 +514,7 @@ public class WorkflowRunner {
             });
 
             interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
+            emitActorTree(effectiveEmitter);
 
             // Debug: log initial state and loaded transitions to both server log and SSE
             String initMsg = "Initial state: '" + interpreter.getCurrentState() + "'";
@@ -412,6 +537,7 @@ public class WorkflowRunner {
             while (iteration < maxIterations && !stopRequested) {
                 ActionResult result = interpreter.execCode();
                 String currentState = interpreter.getCurrentState();
+                emitActorTree(effectiveEmitter);
                 // Debug: log each step result
                 String stepDebug = "execCode result: success=" + (result != null && result.isSuccess())
                         + " state=" + currentState
@@ -451,7 +577,7 @@ public class WorkflowRunner {
             logger.log(Level.WARNING, "Workflow execution failed", e);
             effectiveEmitter.accept(new WorkflowEvent("error", "Execution failed: " + e.getMessage(), null, null));
         } finally {
-            currentInterpreter = null;
+            // Do not null out currentInterpreter - it is the default interpreter actor, reused across runs
             System.setOut(origOut);
             System.setErr(origErr);
             setOutputListeners(null);
@@ -466,6 +592,8 @@ public class WorkflowRunner {
                 shell.setOutputListener(listener);
             } else if (actor instanceof LogActor log) {
                 log.setOutputListener(listener);
+            } else if (actor instanceof MilestoneActor ms) {
+                ms.setOutputListener(listener);
             }
             // For dynamically loaded actors, try to call setOutputListener via reflection
             trySetOutputListenerReflective(actor, listener);

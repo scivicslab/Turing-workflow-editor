@@ -1,4 +1,4 @@
-name: Native Image Release
+name: Release
 
 on:
   push:
@@ -9,68 +9,40 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            label: linux-x86_64
-            suffix: ''
-            arch: ''
-          - os: ubuntu-24.04-arm
-            label: linux-aarch64
-            suffix: ''
-            arch: ''
-          - os: macos-14
-            label: macos-aarch64
-            suffix: ''
-            arch: ''
-          - os: macos-latest
-            label: macos-x86_64
-            suffix: ''
-            arch: 'x64'
-          - os: windows-latest
-            label: windows-x86_64
-            suffix: '.exe'
-            arch: ''
-
-    runs-on: ${{ matrix.os }}
-    name: Build ${{ matrix.label }}
+  build-uber-jar:
+    runs-on: ubuntu-latest
+    name: Build uber-JAR
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: graalvm/setup-graalvm@v1
+      - uses: actions/setup-java@v4
         with:
           java-version: '21'
-          distribution: 'graalvm-community'
-          architecture: ${{ matrix.arch || '' }}
+          distribution: 'temurin'
 
-      - name: Build native image
-        run: |
-          mvn package -Dnative -DskipTests
+      - name: Build uber-JAR
+        run: mvn package -Dquarkus.package.type=uber-jar -DskipTests
 
       - name: Rename artifact
-        shell: bash
         run: |
           TAG="${GITHUB_REF_NAME}"
-          DEST="turing-workflow-editor-${TAG}-${{ matrix.label }}${{ matrix.suffix }}"
-          SRC=$(ls target/turing-workflow-editor-*-runner${{ matrix.suffix }} 2>/dev/null || echo "")
+          SRC=$(ls target/turing-workflow-editor-*-runner.jar 2>/dev/null || echo "")
           if [ -z "$SRC" ]; then
-            echo "::error::Native image not found in target/"
+            echo "::error::uber-JAR not found in target/"
             ls -la target/
             exit 1
           fi
-          cp "${SRC}" "${DEST}"
-          echo "ARTIFACT=${DEST}" >> $GITHUB_ENV
+          cp "${SRC}" "turing-workflow-editor-${TAG}.jar"
+          echo "ARTIFACT=turing-workflow-editor-${TAG}.jar" >> $GITHUB_ENV
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.label }}
+          name: uber-jar
           path: ${{ env.ARTIFACT }}
 
   release:
-    needs: build
+    needs: build-uber-jar
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -78,8 +50,7 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
           files: artifacts/*
+          generate_release_notes: true

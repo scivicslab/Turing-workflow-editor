@@ -11,6 +11,9 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
@@ -322,6 +325,184 @@ public class WorkflowApiResource {
             var loader = runner.getSystem().getIIActor("loader");
             ActionResult result = loader.callByActionName("createChild", args);
             return Map.of("status", result.isSuccess() ? "ok" : "error", "result", result.getResult());
+        } catch (Exception e) {
+            return Map.of("status", "error", "message", e.getMessage());
+        }
+    }
+
+    // --- Actor Tree ---
+
+    @GET
+    @Path("/actors/tree")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<Map<String, Object>> getActorTree() {
+        return runner.getActorTree();
+    }
+
+    @GET
+    @Path("/actors/{name}/data")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getActorData(@PathParam("name") String name) {
+        var system = runner.getSystem();
+        if (!system.hasIIActor(name)) {
+            return Response.status(404).entity(Map.of("error", "Actor not found: " + name)).build();
+        }
+        var actor = system.getIIActor(name);
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("name", actor.getName());
+        result.put("type", actor.getClass().getSimpleName());
+        result.put("parent", actor.getParentName());
+        result.put("children", new java.util.ArrayList<>(actor.getNamesOfChildren()));
+        try {
+            result.put("jsonState", actor.json().toString());
+        } catch (Exception e) {
+            result.put("jsonState", "{}");
+        }
+        return Response.ok(result).build();
+    }
+
+    // --- Plugins & Workflows Browser ---
+
+    @GET
+    @Path("/plugins/available")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<Map<String, Object>> availablePlugins() {
+        List<Map<String, Object>> plugins = new ArrayList<>();
+        var repoBase = java.nio.file.Path.of(System.getProperty("user.home"), ".m2", "repository", "com", "scivicslab");
+        if (!java.nio.file.Files.isDirectory(repoBase)) return plugins;
+
+        try (var dirs = java.nio.file.Files.newDirectoryStream(repoBase, "actor-*")) {
+            for (var artifactDir : dirs) {
+                String artifactId = artifactDir.getFileName().toString();
+                List<String> versions = new ArrayList<>();
+                String latestVersion = null;
+                String latestJar = null;
+
+                try (var versionDirs = java.nio.file.Files.newDirectoryStream(artifactDir, java.nio.file.Files::isDirectory)) {
+                    for (var versionDir : versionDirs) {
+                        String ver = versionDir.getFileName().toString();
+                        versions.add(ver);
+                        // Find the main JAR (not -sources, -javadoc, -cli)
+                        try (var jars = java.nio.file.Files.newDirectoryStream(versionDir, "*.jar")) {
+                            for (var jar : jars) {
+                                String jarName = jar.getFileName().toString();
+                                if (!jarName.contains("-sources") && !jarName.contains("-javadoc")
+                                        && !jarName.contains("-cli")) {
+                                    latestVersion = ver;
+                                    latestJar = jar.toAbsolutePath().toString();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!versions.isEmpty()) {
+                    Map<String, Object> plugin = new LinkedHashMap<>();
+                    plugin.put("artifactId", artifactId);
+                    plugin.put("groupId", "com.scivicslab");
+                    plugin.put("versions", versions);
+                    plugin.put("latestVersion", latestVersion);
+                    plugin.put("latestJar", latestJar);
+                    plugin.put("coordinate", "com.scivicslab:" + artifactId + ":" + latestVersion);
+                    plugins.add(plugin);
+                }
+            }
+        } catch (IOException e) {
+            logger.warning("Failed to scan plugins: " + e.getMessage());
+        }
+        return plugins;
+    }
+
+    @GET
+    @Path("/workflows/available")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<Map<String, String>> availableWorkflows() {
+        List<Map<String, String>> workflows = new ArrayList<>();
+        var worksDir = java.nio.file.Path.of(System.getProperty("user.home"), "works");
+        if (!java.nio.file.Files.isDirectory(worksDir)) return workflows;
+
+        // Scan ~/works/*/src/main/resources/{workflows,code}/*.yaml
+        try (var projects = java.nio.file.Files.newDirectoryStream(worksDir, java.nio.file.Files::isDirectory)) {
+            for (var project : projects) {
+                String projectName = project.getFileName().toString();
+                scanWorkflowDir(project.resolve("src/main/resources/workflows"), projectName, workflows);
+                scanWorkflowDir(project.resolve("src/main/resources/code"), projectName, workflows);
+            }
+        } catch (IOException e) {
+            logger.warning("Failed to scan workflows: " + e.getMessage());
+        }
+
+        // Also scan ~/works/testcluster-iac/*.yaml (direct YAML files)
+        var testclusterDir = worksDir.resolve("testcluster-iac");
+        if (java.nio.file.Files.isDirectory(testclusterDir)) {
+            try (var yamls = java.nio.file.Files.newDirectoryStream(testclusterDir, "*.yaml")) {
+                for (var yaml : yamls) {
+                    addWorkflowEntry(yaml, "testcluster-iac", workflows);
+                }
+            } catch (IOException e) {
+                // ignore
+            }
+        }
+
+        return workflows;
+    }
+
+    private void scanWorkflowDir(java.nio.file.Path dir, String projectName, List<Map<String, String>> workflows) {
+        if (!java.nio.file.Files.isDirectory(dir)) return;
+        try (var yamls = java.nio.file.Files.newDirectoryStream(dir, "*.yaml")) {
+            for (var yaml : yamls) {
+                addWorkflowEntry(yaml, projectName, workflows);
+            }
+        } catch (IOException e) {
+            // ignore
+        }
+    }
+
+    private void addWorkflowEntry(java.nio.file.Path yaml, String projectName, List<Map<String, String>> workflows) {
+        try {
+            String content = java.nio.file.Files.readString(yaml);
+            // Quick check: valid workflow YAML should contain "steps:" or "states:"
+            if (!content.contains("steps:") && !content.contains("states:")) return;
+
+            // Extract name from YAML
+            String name = yaml.getFileName().toString().replace(".yaml", "");
+            for (String line : content.lines().toList()) {
+                if (line.startsWith("name:")) {
+                    name = line.substring(5).trim().replace("\"", "").replace("'", "");
+                    break;
+                }
+            }
+
+            Map<String, String> entry = new LinkedHashMap<>();
+            entry.put("name", name);
+            entry.put("file", yaml.getFileName().toString());
+            entry.put("project", projectName);
+            entry.put("path", yaml.toAbsolutePath().toString());
+            workflows.add(entry);
+        } catch (IOException e) {
+            // skip unreadable files
+        }
+    }
+
+    @POST
+    @Path("/workflows/load")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> loadWorkflow(Map<String, String> body) {
+        String path = body.get("path");
+        if (path == null || path.isBlank()) {
+            return Map.of("status", "error", "message", "path is required");
+        }
+        try {
+            String yaml = java.nio.file.Files.readString(java.nio.file.Path.of(path));
+            WorkflowRunner.ParsedWorkflow parsed = WorkflowRunner.fromYaml(yaml);
+            List<MatrixRow> rows = WorkflowRunner.stepsToRows(parsed.steps());
+            state.replaceAll(parsed.name(), rows, state.getMaxIterations());
+            if (parsed.description() != null) {
+                state.setDescription(parsed.description());
+            }
+            notifyStateChanged("Workflow loaded: " + parsed.name());
+            return Map.of("status", "ok", "name", parsed.name(), "stepCount", parsed.steps().size(), "yaml", yaml);
         } catch (Exception e) {
             return Map.of("status", "error", "message", e.getMessage());
         }

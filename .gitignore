@@ -6,3 +6,5 @@ target/
 .classpath
 .vscode/
 *.class
+node_modules/
+test-results/
