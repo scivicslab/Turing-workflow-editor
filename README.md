@@ -32,10 +32,10 @@ mvn install
 java -jar target/quarkus-app/quarkus-run.jar
 ```
 
-Or download a native image binary from [Releases](https://github.com/scivicslab/Turing-workflow-editor/releases):
+Or download the pre-built uber-jar from [Releases](https://github.com/scivicslab/Turing-workflow-editor/releases):
 
 ```bash
-./turing-workflow-editor-v1.0.0-linux-x86_64
+java -jar turing-workflow-editor-<version>.jar
 ```
 
 Starts on port 8091 by default (configurable in `application.properties`).
