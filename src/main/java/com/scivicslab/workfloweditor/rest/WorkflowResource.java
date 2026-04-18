@@ -20,12 +20,20 @@ import jakarta.ws.rs.core.MediaType;
 import com.scivicslab.workfloweditor.service.WorkflowRunner.StepDto;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jakarta.ws.rs.QueryParam;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.yaml.snakeyaml.Yaml;
 
 /**
  * REST + SSE endpoint for workflow editing and execution.
@@ -47,6 +55,9 @@ public class WorkflowResource {
 
     @Inject
     ObjectMapper objectMapper;
+
+    @ConfigProperty(name = "workflow.params.base-dir", defaultValue = "/home/devteam/works")
+    String paramsBaseDir;
 
     private final java.util.concurrent.CopyOnWriteArrayList<HttpServerResponse> sseConnections = new java.util.concurrent.CopyOnWriteArrayList<>();
 
@@ -106,7 +117,9 @@ public class WorkflowResource {
 
         if (request.steps != null) {
             // Use structured steps (supports delay/breakpoint)
-            String yaml = WorkflowRunner.toYamlStructured(request.name, null, request.steps);
+            final String yaml = WorkflowRunner.applyParameters(
+                WorkflowRunner.toYamlStructured(request.name, null, request.steps),
+                request.parameters);
             List<MatrixRow> rows = WorkflowRunner.stepsToRows(request.steps);
             workflowState.replaceAll(request.name, rows, maxIter);
             Thread.startVirtualThread(() -> {
@@ -132,6 +145,68 @@ public class WorkflowResource {
         }
 
         return Map.of("status", "started");
+    }
+
+    /**
+     * Returns parameter metadata (description, default) for the active workflow.
+     * Used by the Run dialog to show helpful hints.
+     */
+    @GET
+    @Path("/params/meta")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> getParamsMeta() {
+        var result = new LinkedHashMap<String, Object>();
+        for (var entry : workflowState.getParams().entrySet()) {
+            var meta = new LinkedHashMap<String, String>();
+            var pm = entry.getValue();
+            meta.put("description", pm.description() != null ? pm.description() : "");
+            meta.put("default", pm.defaultValue() != null ? pm.defaultValue() : "");
+            result.put(entry.getKey(), meta);
+        }
+        return result;
+    }
+
+    /**
+     * Lists overlay-conf.yaml files under the configured base directory.
+     */
+    @GET
+    @Path("/params/files")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<String> listParamFiles() {
+        var result = new ArrayList<String>();
+        try (var stream = Files.walk(Paths.get(paramsBaseDir), 4)) {
+            stream.filter(p -> p.getFileName().toString().endsWith(".yaml"))
+                  .map(java.nio.file.Path::toString)
+                  .sorted()
+                  .forEach(result::add);
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "Failed to list param files", e);
+        }
+        return result;
+    }
+
+    /**
+     * Loads a YAML parameter file and returns its vars section.
+     */
+    @GET
+    @Path("/params/load")
+    @Produces(MediaType.APPLICATION_JSON)
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> loadParamFile(@QueryParam("path") String path) {
+        if (path == null || path.isBlank()) {
+            return Map.of("error", "path is required");
+        }
+        try {
+            String content = Files.readString(Paths.get(path));
+            Map<String, Object> data = new Yaml().load(content);
+            Object vars = data != null ? data.get("vars") : null;
+            var result = new LinkedHashMap<String, Object>();
+            result.put("vars", vars instanceof Map ? vars : Map.of());
+            return result;
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "Failed to load param file: " + path, e);
+            return Map.of("error", e.getMessage());
+        }
     }
 
     /**
@@ -217,6 +292,7 @@ public class WorkflowResource {
         public List<StepDto> steps;
         public Integer maxIterations;
         public String logLevel;
+        public Map<String, String> parameters;
     }
 
     @RegisterForReflection

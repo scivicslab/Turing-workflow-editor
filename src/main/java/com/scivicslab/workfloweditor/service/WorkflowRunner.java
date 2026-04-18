@@ -743,17 +743,53 @@ public class WorkflowRunner {
             stepDtos.add(new StepDto(from, to, label, note, stepDelay, stepBreakpoint, actionDtos));
         }
 
-        return new ParsedWorkflow(name, description, stepDtos);
+        // Parse params: section
+        Map<String, ParamMeta> params = new LinkedHashMap<>();
+        Object rawParams = doc.get("params");
+        if (rawParams instanceof Map<?, ?> paramsMap) {
+            for (var entry : paramsMap.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                String desc = "";
+                String def = "";
+                if (entry.getValue() instanceof Map<?, ?> meta) {
+                    Object d = meta.get("description");
+                    Object v = meta.get("default");
+                    if (d != null) desc = String.valueOf(d);
+                    if (v != null) def = String.valueOf(v);
+                }
+                params.put(key, new ParamMeta(desc, def));
+            }
+        }
+
+        return new ParsedWorkflow(name, description, stepDtos, params);
     }
 
     /**
      * Converts structured steps to YAML including description/label/note.
      */
     public static String toYamlStructured(String name, String description, List<StepDto> steps) {
+        return toYamlStructured(name, description, steps, null);
+    }
+
+    public static String toYamlStructured(String name, String description, List<StepDto> steps,
+                                          Map<String, ParamMeta> params) {
         var sb = new StringBuilder();
         sb.append("name: ").append(yamlEscape(name)).append("\n");
         if (description != null && !description.isEmpty()) {
             sb.append("description: ").append(yamlEscape(description)).append("\n");
+        }
+        if (params != null && !params.isEmpty()) {
+            sb.append("params:\n");
+            for (var entry : params.entrySet()) {
+                sb.append("  ").append(entry.getKey()).append(":\n");
+                ParamMeta m = entry.getValue();
+                if (m.description() != null && !m.description().isEmpty()) {
+                    sb.append("    description: ").append(yamlEscape(m.description())).append("\n");
+                }
+                if (m.defaultValue() != null && !m.defaultValue().isEmpty()) {
+                    sb.append("    default: ").append(yamlEscape(m.defaultValue())).append("\n");
+                }
+            }
         }
         sb.append("steps:\n");
 
@@ -783,6 +819,17 @@ public class WorkflowRunner {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Substitutes ${key} placeholders in yaml with values from parameters map.
+     */
+    public static String applyParameters(String yaml, Map<String, String> parameters) {
+        if (parameters == null || parameters.isEmpty()) return yaml;
+        for (var entry : parameters.entrySet()) {
+            yaml = yaml.replace("${" + entry.getKey() + "}", entry.getValue());
+        }
+        return yaml;
     }
 
     /**
@@ -834,7 +881,14 @@ public class WorkflowRunner {
     }
 
     @RegisterForReflection
-    public record ParsedWorkflow(String name, String description, List<StepDto> steps) {}
+    public record ParsedWorkflow(String name, String description, List<StepDto> steps,
+                                 Map<String, ParamMeta> params) {
+        public ParsedWorkflow(String name, String description, List<StepDto> steps) {
+            this(name, description, steps, Map.of());
+        }
+    }
+
+    public record ParamMeta(String description, String defaultValue) {}
     @RegisterForReflection
     public record StepDto(String from, String to, String label, String note, Long delay, Boolean breakpoint, List<ActionDto> actions) {}
     @RegisterForReflection

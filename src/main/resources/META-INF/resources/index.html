@@ -103,6 +103,36 @@
             </section>
         </div>
     </main>
+    <!-- Run Parameter Dialog -->
+    <div id="paramDialog" class="modal-overlay" style="display:none;">
+        <div class="modal-box">
+            <h2 class="modal-title">Run Workflow</h2>
+
+            <div class="param-section">
+                <label class="param-label">Environment parameter file:</label>
+                <div class="param-file-row">
+                    <select id="paramFileSelect"><option value="">(none)</option></select>
+                    <button id="paramFileLoad" class="btn btn-small">Load</button>
+                </div>
+            </div>
+
+            <div id="paramPreFilled" class="param-section" style="display:none;">
+                <label class="param-label">Loaded from file:</label>
+                <div id="paramPreFilledList" class="param-prefilled-list"></div>
+            </div>
+
+            <div id="paramRequired" class="param-section" style="display:none;">
+                <label class="param-label">Additional parameters:</label>
+                <div id="paramRequiredList" class="param-required-list"></div>
+            </div>
+
+            <div class="modal-actions">
+                <button id="paramCancel" class="btn btn-small">Cancel</button>
+                <button id="paramRun" class="btn btn-run">Run</button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

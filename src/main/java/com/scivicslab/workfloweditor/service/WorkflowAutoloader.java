@@ -53,6 +53,9 @@ public class WorkflowAutoloader {
             if (parsed.description() != null) {
                 state.setDescription(parsed.description());
             }
+            if (parsed.params() != null && !parsed.params().isEmpty()) {
+                state.setParams(parsed.params());
+            }
             LOG.info("Autoloaded workflow from " + path + ": " + parsed.name()
                     + " (" + parsed.steps().size() + " steps)");
         } catch (Exception e) {

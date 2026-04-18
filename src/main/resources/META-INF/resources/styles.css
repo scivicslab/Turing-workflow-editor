@@ -1338,3 +1338,157 @@ a.actor-action-link:hover {
 .act-row-actions button.act-delete-btn:hover {
     color: var(--accent-red);
 }
+
+/* --- Run Parameter Dialog --- */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 24px;
+    min-width: 480px;
+    max-width: 640px;
+    width: 90%;
+    max-height: 85vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.modal-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.param-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.param-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.param-file-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.param-file-row select {
+    flex: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.param-prefilled-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.param-prefilled-item {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+}
+
+.param-prefilled-key {
+    color: var(--accent-blue);
+    font-family: monospace;
+    min-width: 120px;
+}
+
+.param-prefilled-val {
+    color: var(--text-secondary);
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.param-required-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.param-required-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.param-required-item > .param-required-key {
+    align-self: flex-start;
+}
+
+.param-required-item-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.param-required-key {
+    font-size: 12px;
+    color: var(--accent-blue);
+    font-family: monospace;
+    min-width: 120px;
+}
+
+.param-required-input {
+    flex: 1;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: inherit;
+    resize: vertical;
+}
+
+.param-required-input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.param-hint {
+    font-size: 11px;
+    color: var(--text-secondary, #888);
+    padding-left: 2px;
+    font-style: italic;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+}

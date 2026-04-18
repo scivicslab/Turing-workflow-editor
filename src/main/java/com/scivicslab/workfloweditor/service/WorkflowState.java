@@ -1,6 +1,7 @@
 package com.scivicslab.workfloweditor.service;
 
 import com.scivicslab.workfloweditor.rest.WorkflowResource.MatrixRow;
+import com.scivicslab.workfloweditor.service.WorkflowRunner.ParamMeta;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.ArrayList;
@@ -25,6 +26,7 @@ public class WorkflowState {
         public final CopyOnWriteArrayList<MatrixRow> rows = new CopyOnWriteArrayList<>();
         public volatile int maxIterations = 100;
         public volatile String description = null;
+        public volatile Map<String, ParamMeta> params = new LinkedHashMap<>();
 
         public TabData(String name) {
             this.name = name;
@@ -131,6 +133,14 @@ public class WorkflowState {
 
     public void setDescription(String description) {
         active().description = description;
+    }
+
+    public Map<String, ParamMeta> getParams() {
+        return active().params != null ? active().params : Map.of();
+    }
+
+    public void setParams(Map<String, ParamMeta> params) {
+        active().params = params != null ? params : new LinkedHashMap<>();
     }
 
     public List<MatrixRow> getRows() {

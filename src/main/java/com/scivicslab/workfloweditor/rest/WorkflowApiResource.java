@@ -129,6 +129,7 @@ public class WorkflowApiResource {
             if (parsed.description() != null) {
                 state.setDescription(parsed.description());
             }
+            state.setParams(parsed.params());
             notifyStateChanged("YAML imported: " + parsed.name());
             return Map.of("status", "ok", "name", parsed.name(), "stepCount", parsed.steps().size());
         } catch (Exception e) {
@@ -501,6 +502,7 @@ public class WorkflowApiResource {
             if (parsed.description() != null) {
                 state.setDescription(parsed.description());
             }
+            state.setParams(parsed.params());
             notifyStateChanged("Workflow loaded: " + parsed.name());
             return Map.of("status", "ok", "name", parsed.name(), "stepCount", parsed.steps().size(), "yaml", yaml);
         } catch (Exception e) {

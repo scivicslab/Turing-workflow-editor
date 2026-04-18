@@ -687,20 +687,168 @@
         }
     }
 
-    runBtn.addEventListener('click', function () {
-        var steps = getSteps();
-        if (steps.length === 0) {
-            appendLog('error', 'No valid steps to run');
-            return;
+    // --- Run Parameter Dialog ---
+
+    var paramDialog = document.getElementById('paramDialog');
+    var paramFileSelect = document.getElementById('paramFileSelect');
+    var paramFileLoad = document.getElementById('paramFileLoad');
+    var paramPreFilled = document.getElementById('paramPreFilled');
+    var paramPreFilledList = document.getElementById('paramPreFilledList');
+    var paramRequired = document.getElementById('paramRequired');
+    var paramRequiredList = document.getElementById('paramRequiredList');
+    var paramCancel = document.getElementById('paramCancel');
+    var paramRun = document.getElementById('paramRun');
+
+    var _paramLoadedVars = {};
+    var _paramPendingSteps = null;
+
+    function extractVariables(steps) {
+        var found = {};
+        var re = /\$\{([^}]+)\}/g;
+        steps.forEach(function (step) {
+            (step.actions || []).forEach(function (action) {
+                var text = (action.arguments || '') + ' ' + (action.actor || '') + ' ' + (action.method || '');
+                var m;
+                while ((m = re.exec(text)) !== null) {
+                    if (m[1] !== 'result') found[m[1]] = true;
+                    re.lastIndex = m.index + 1;
+                }
+            });
+            // also scan label / note
+            var extra = (step.label || '') + ' ' + (step.note || '');
+            var m2;
+            while ((m2 = re.exec(extra)) !== null) {
+                if (m2[1] !== 'result') found[m2[1]] = true;
+                re.lastIndex = m2.index + 1;
+            }
+        });
+        return Object.keys(found);
+    }
+
+    var _paramMeta = {};  // {key: {description, default}}
+
+    function renderParamDialog(allVars) {
+        _paramLoadedVars = _paramLoadedVars || {};
+        var preFilledKeys = Object.keys(_paramLoadedVars);
+        var requiredKeys = allVars.filter(function (v) { return !_paramLoadedVars.hasOwnProperty(v); });
+
+        // pre-filled section
+        if (preFilledKeys.length > 0) {
+            paramPreFilledList.innerHTML = '';
+            preFilledKeys.forEach(function (k) {
+                var item = document.createElement('div');
+                item.className = 'param-prefilled-item';
+                item.innerHTML = '<span class="param-prefilled-key">' + k + '</span>' +
+                    '<span class="param-prefilled-val">' + escapeHtml(_paramLoadedVars[k]) + '</span>';
+                paramPreFilledList.appendChild(item);
+            });
+            paramPreFilled.style.display = '';
+        } else {
+            paramPreFilled.style.display = 'none';
         }
+
+        // required inputs section
+        if (requiredKeys.length > 0) {
+            paramRequiredList.innerHTML = '';
+            requiredKeys.forEach(function (k) {
+                var meta = _paramMeta[k] || {};
+                var item = document.createElement('div');
+                item.className = 'param-required-item';
+
+                var label = document.createElement('span');
+                label.className = 'param-required-key';
+                label.textContent = k;
+                item.appendChild(label);
+
+                var input = document.createElement('textarea');
+                input.className = 'param-required-input';
+                input.dataset.paramKey = k;
+                input.rows = 2;
+                if (meta.default) input.value = meta.default;
+                if (meta.description) input.placeholder = meta.description;
+                item.appendChild(input);
+
+                if (meta.description) {
+                    var hint = document.createElement('div');
+                    hint.className = 'param-hint';
+                    hint.textContent = meta.description;
+                    item.appendChild(hint);
+                }
+
+                paramRequiredList.appendChild(item);
+            });
+            paramRequired.style.display = '';
+        } else {
+            paramRequired.style.display = 'none';
+        }
+    }
+
+    function escapeHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function openParamDialog(steps) {
+        _paramPendingSteps = steps;
+        _paramLoadedVars = {};
+        _paramMeta = {};
+        paramPreFilled.style.display = 'none';
+        paramRequired.style.display = 'none';
+
+        var allVars = extractVariables(steps);
+
+        // Load file list and param metadata in parallel
+        Promise.all([
+            fetch('/api/params/files').then(function (r) { return r.json(); }).catch(function () { return []; }),
+            fetch('/api/params/meta').then(function (r) { return r.json(); }).catch(function () { return {}; })
+        ]).then(function (results) {
+            var files = results[0];
+            _paramMeta = results[1] || {};
+
+            paramFileSelect.innerHTML = '<option value="">(none)</option>';
+            files.forEach(function (f) {
+                var opt = document.createElement('option');
+                opt.value = f;
+                opt.textContent = f;
+                paramFileSelect.appendChild(opt);
+            });
+
+            renderParamDialog(allVars);
+        });
+
+        paramDialog.style.display = 'flex';
+    }
+
+    paramFileLoad.addEventListener('click', function () {
+        var path = paramFileSelect.value;
+        if (!path) return;
+        fetch('/api/params/load?path=' + encodeURIComponent(path))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                _paramLoadedVars = data.vars || {};
+                renderParamDialog(extractVariables(_paramPendingSteps));
+            })
+            .catch(function (err) { appendLog('error', 'Failed to load param file: ' + err.message); });
+    });
+
+    paramCancel.addEventListener('click', function () {
+        paramDialog.style.display = 'none';
+        _paramPendingSteps = null;
+    });
+
+    paramRun.addEventListener('click', function () {
+        var parameters = Object.assign({}, _paramLoadedVars);
+        paramRequiredList.querySelectorAll('[data-param-key]').forEach(function (input) {
+            if (input.value.trim()) parameters[input.dataset.paramKey] = input.value.trim();
+        });
+
+        paramDialog.style.display = 'none';
+        var steps = _paramPendingSteps;
+        _paramPendingSteps = null;
 
         setRunning(true);
         clearAllHighlights();
-        // Highlight the first step as the starting point
         var firstGroup = stepsContainer.querySelector('.step-group');
-        if (firstGroup) {
-            firstGroup.classList.add('step-running');
-        }
+        if (firstGroup) firstGroup.classList.add('step-running');
         appendLog('info', 'Starting workflow: ' + (activeTabName || 'workflow'));
 
         fetch('/api/run', {
@@ -710,19 +858,23 @@
                 name: activeTabName || 'workflow',
                 steps: steps,
                 maxIterations: getMaxIterations(),
-                logLevel: logLevelSelect.value
+                logLevel: logLevelSelect.value,
+                parameters: parameters
             })
-        }).then(function (res) {
-            return res.json();
-        }).then(function (data) {
-            if (data.status === 'error') {
-                appendLog('error', data.message);
-                setRunning(false);
-            }
-        }).catch(function (err) {
-            appendLog('error', 'Failed to start: ' + err.message);
-            setRunning(false);
-        });
+        }).then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.status === 'error') { appendLog('error', data.message); setRunning(false); }
+          })
+          .catch(function (err) { appendLog('error', 'Failed to start: ' + err.message); setRunning(false); });
+    });
+
+    runBtn.addEventListener('click', function () {
+        var steps = getSteps();
+        if (steps.length === 0) {
+            appendLog('error', 'No valid steps to run');
+            return;
+        }
+        openParamDialog(steps);
     });
 
     stopBtn.addEventListener('click', function () {
