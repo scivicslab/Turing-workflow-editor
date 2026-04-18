@@ -1470,7 +1470,7 @@ a.actor-action-link:hover {
     border-radius: 4px;
     font-size: 12px;
     font-family: inherit;
-    resize: vertical;
+    resize: both;
 }
 
 .param-required-input:focus {
