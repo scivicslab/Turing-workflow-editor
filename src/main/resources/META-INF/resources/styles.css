@@ -190,6 +190,45 @@ header h1 {
     white-space: nowrap;
 }
 
+.header-menu-wrap {
+    position: relative;
+}
+
+.header-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    z-index: 2000;
+    min-width: 160px;
+    padding: 4px 0;
+}
+
+.header-menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    padding: 7px 16px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.header-menu-item:hover {
+    background: var(--row-hover);
+}
+
+.header-menu-divider {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 4px 0;
+}
+
 .header-controls {
     display: flex;
     align-items: center;
@@ -314,6 +353,19 @@ header h1 {
     color: var(--text-primary);
 }
 
+.btn-save {
+    background: var(--accent-yellow);
+    color: var(--bg-primary);
+    border-color: var(--accent-yellow);
+    padding: 4px 14px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.btn-save:hover {
+    opacity: 0.85;
+}
+
 main {
     flex: 1;
     display: flex;
@@ -339,9 +391,9 @@ main {
 
 /* --- Actor Tree Panel --- */
 .actor-tree-panel {
-    width: 260px;
+    width: 433px;
     min-width: 160px;
-    max-width: 500px;
+    max-width: 800px;
     display: flex;
     flex-direction: column;
     background: var(--bg-secondary);
@@ -388,6 +440,29 @@ main {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+.side-panel-run {
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.run-panel-controls {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+}
+
+.run-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 /* Plugin/Workflow items in side panel */
@@ -1073,8 +1148,10 @@ a.actor-action-link:hover {
     margin: 6px 0;
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    overflow: hidden;
+    overflow: auto;
     background: var(--bg-secondary);
+    resize: vertical;
+    min-height: 60px;
 }
 
 .step-group.step-running {
@@ -1156,8 +1233,8 @@ a.actor-action-link:hover {
 }
 
 .step-label {
-    width: 268px;
-    min-width: 268px;
+    width: 30%;
+    min-width: 120px;
     background: var(--input-bg);
     border: 1px solid transparent;
     color: var(--text-secondary);
@@ -1263,11 +1340,11 @@ a.actor-action-link:hover {
     border-bottom: 1px solid var(--border-color);
 }
 
-.action-table .col-act-num { width: 30px; text-align: center; }
-.action-table .col-act-actor { width: 268px; }
-.action-table .col-act-method { width: 268px; }
-.action-table .col-act-args { /* auto: fills remaining width to align with note right edge */ }
-.action-table .col-act-actions { width: 180px; text-align: center; }
+.action-table .col-act-num { width: 30px; min-width: 30px; text-align: center; }
+.action-table .col-act-actor { width: 18%; min-width: 80px; }
+.action-table .col-act-method { width: 18%; min-width: 80px; }
+.action-table .col-act-args { width: 55%; }
+.action-table .col-act-actions { width: 50px; min-width: 50px; text-align: center; }
 
 .action-table td {
     padding: 1px 3px;
@@ -1356,12 +1433,20 @@ a.actor-action-link:hover {
     border-radius: 8px;
     padding: 24px;
     min-width: 480px;
-    max-width: 640px;
-    width: 90%;
-    max-height: 85vh;
+    width: 640px;
+    min-height: 200px;
+    max-height: 90vh;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+    gap: 16px;
+    resize: both;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 16px;
 }
 
@@ -1389,14 +1474,29 @@ a.actor-action-link:hover {
     align-items: center;
 }
 
-.param-file-row select {
-    flex: 1;
+.param-file-preview {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 6px;
     background: var(--input-bg);
     border: 1px solid var(--border-color);
-    color: var(--text-primary);
+    color: var(--text-secondary);
     padding: 4px 8px;
     border-radius: 4px;
+    font-size: 11px;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    resize: vertical;
+    overflow: auto;
+    white-space: pre;
+}
+
+.param-file-name {
+    flex: 1;
     font-size: 12px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .param-prefilled-list {
@@ -1460,7 +1560,6 @@ a.actor-action-link:hover {
 }
 
 .param-required-input {
-    flex: 1;
     width: 100%;
     box-sizing: border-box;
     background: var(--input-bg);
@@ -1470,12 +1569,20 @@ a.actor-action-link:hover {
     border-radius: 4px;
     font-size: 12px;
     font-family: inherit;
-    resize: both;
+    resize: vertical;
+    min-height: 60px;
 }
 
 .param-required-input:focus {
     outline: none;
     border-color: var(--accent-blue);
+}
+
+.param-no-params {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+    padding: 8px 2px;
 }
 
 .param-hint {
@@ -1489,6 +1596,4 @@ a.actor-action-link:hover {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-color);
 }

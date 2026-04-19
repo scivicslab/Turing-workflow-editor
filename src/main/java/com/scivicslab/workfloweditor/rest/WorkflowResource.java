@@ -131,17 +131,7 @@ public class WorkflowResource {
                 }
             });
         } else {
-            List<MatrixRow> rows = request.rows;
-            workflowState.replaceAll(request.name, rows, maxIter);
-            final List<MatrixRow> finalRows = rows;
-            Thread.startVirtualThread(() -> {
-                try {
-                    runner.run(request.name, finalRows, maxIter, logLevel, this::emitSse);
-                } catch (Exception e) {
-                    logger.log(Level.WARNING, "Workflow failed", e);
-                    emitSse(new WorkflowEvent("error", e.getMessage(), null, null));
-                }
-            });
+            return Map.of("status", "error", "message", "No workflow steps provided");
         }
 
         return Map.of("status", "started");
@@ -186,25 +176,23 @@ public class WorkflowResource {
     }
 
     /**
-     * Loads a YAML parameter file and returns its vars section.
+     * Parses YAML parameter content sent from the browser and returns its vars section.
      */
-    @GET
-    @Path("/params/load")
+    @POST
+    @Path("/params/parse")
+    @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
     @SuppressWarnings("unchecked")
-    public Map<String, Object> loadParamFile(@QueryParam("path") String path) {
-        if (path == null || path.isBlank()) {
-            return Map.of("error", "path is required");
-        }
+    public Map<String, Object> parseParamContent(String content) {
         try {
-            String content = Files.readString(Paths.get(path));
             Map<String, Object> data = new Yaml().load(content);
             Object vars = data != null ? data.get("vars") : null;
             var result = new LinkedHashMap<String, Object>();
             result.put("vars", vars instanceof Map ? vars : Map.of());
+            result.put("raw", content);
             return result;
-        } catch (IOException e) {
-            logger.log(Level.WARNING, "Failed to load param file: " + path, e);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Failed to parse param content", e);
             return Map.of("error", e.getMessage());
         }
     }
@@ -288,7 +276,6 @@ public class WorkflowResource {
     @RegisterForReflection
     public static class RunRequest {
         public String name;
-        public List<MatrixRow> rows;
         public List<StepDto> steps;
         public Integer maxIterations;
         public String logLevel;

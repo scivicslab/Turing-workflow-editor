@@ -46,7 +46,6 @@ public class WorkflowApiResource {
         dto.name = state.getName();
         dto.description = state.getDescription();
         dto.steps = WorkflowRunner.rowsToSteps(state.getRows());
-        dto.rows = state.getRows();
         dto.maxIterations = state.getMaxIterations();
         return dto;
     }
@@ -56,10 +55,10 @@ public class WorkflowApiResource {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, Object> putWorkflow(WorkflowDto dto) {
-        List<MatrixRow> rows = dto.rows;
-        if (rows == null && dto.steps != null) {
-            rows = WorkflowRunner.stepsToRows(dto.steps);
+        if (dto.steps == null || dto.steps.isEmpty()) {
+            return Map.of("status", "error", "message", "No workflow steps provided");
         }
+        List<MatrixRow> rows = WorkflowRunner.stepsToRows(dto.steps);
         state.replaceAll(dto.name, rows, dto.maxIterations != null ? dto.maxIterations : 100);
         if (dto.description != null) {
             state.setDescription(dto.description);
@@ -114,7 +113,8 @@ public class WorkflowApiResource {
     public String exportYaml() {
         return WorkflowRunner.toYamlStructured(
                 state.getName(), state.getDescription(),
-                WorkflowRunner.rowsToSteps(state.getRows()));
+                WorkflowRunner.rowsToSteps(state.getRows()),
+                state.getParams());
     }
 
     @POST
@@ -271,7 +271,7 @@ public class WorkflowApiResource {
         if (state.activateTab(name)) {
             return Response.ok(Map.of("status", "ok",
                     "name", state.getName(),
-                    "rows", state.getRows(),
+                    "steps", WorkflowRunner.rowsToSteps(state.getRows()),
                     "maxIterations", state.getMaxIterations())).build();
         }
         return Response.status(404).entity(Map.of("status", "error", "message", "Tab not found: " + name)).build();
@@ -503,11 +503,52 @@ public class WorkflowApiResource {
                 state.setDescription(parsed.description());
             }
             state.setParams(parsed.params());
+            state.setFilePath(path);
             notifyStateChanged("Workflow loaded: " + parsed.name());
             return Map.of("status", "ok", "name", parsed.name(), "stepCount", parsed.steps().size(), "yaml", yaml);
         } catch (Exception e) {
             return Map.of("status", "error", "message", e.getMessage());
         }
+    }
+
+    @POST
+    @Path("/workflows/save")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> saveWorkflow() {
+        String filePath = state.getFilePath();
+        if (filePath == null || filePath.isBlank()) {
+            return Map.of("status", "error", "message", "No file path known — load a workflow file first.");
+        }
+        try {
+            String yaml = WorkflowRunner.toYamlStructured(
+                    state.getName(), state.getDescription(),
+                    WorkflowRunner.rowsToSteps(state.getRows()));
+            rotateBackups(filePath, 5);
+            java.nio.file.Files.writeString(java.nio.file.Path.of(filePath), yaml);
+            notifyStateChanged("Workflow saved: " + filePath);
+            return Map.of("status", "ok", "path", filePath);
+        } catch (Exception e) {
+            return Map.of("status", "error", "message", e.getMessage());
+        }
+    }
+
+    private void rotateBackups(String filePath, int maxBackups) throws java.io.IOException {
+        java.nio.file.Path src = java.nio.file.Path.of(filePath);
+        if (!java.nio.file.Files.exists(src)) return;
+        // Drop the oldest slot if it exists
+        java.nio.file.Path oldest = java.nio.file.Path.of(filePath + ".~" + maxBackups + "~");
+        java.nio.file.Files.deleteIfExists(oldest);
+        // Shift backups: .~(N-1)~ → .~N~, ..., .~1~ → .~2~
+        for (int i = maxBackups - 1; i >= 1; i--) {
+            java.nio.file.Path from = java.nio.file.Path.of(filePath + ".~" + i + "~");
+            java.nio.file.Path to   = java.nio.file.Path.of(filePath + ".~" + (i + 1) + "~");
+            if (java.nio.file.Files.exists(from)) {
+                java.nio.file.Files.move(from, to, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+        // Current file → .~1~
+        java.nio.file.Files.copy(src, java.nio.file.Path.of(filePath + ".~1~"),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
     // --- Helpers ---
@@ -523,7 +564,6 @@ public class WorkflowApiResource {
         public String name;
         public String description;
         public List<StepDto> steps;
-        public List<MatrixRow> rows;
         public Integer maxIterations;
 
         public WorkflowDto() {}

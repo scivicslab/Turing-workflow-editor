@@ -11,15 +11,34 @@
     <header>
         <h1>Turing Workflow</h1>
         <div class="header-controls">
+            <div class="header-menu-wrap">
+                <button id="fileMenuBtn" class="btn btn-small">File &#9660;</button>
+                <div id="fileMenu" class="header-menu" style="display:none;">
+                    <button id="newWorkflowBtn" class="header-menu-item">New</button>
+                    <button id="importYamlBtn" class="header-menu-item">Import YAML</button>
+                    <hr class="header-menu-divider">
+                    <button id="editYamlBtn" class="header-menu-item">Edit YAML</button>
+                    <hr class="header-menu-divider">
+                    <button id="saveBtn" class="header-menu-item">Save</button>
+                    <button id="exportYamlBtn" class="header-menu-item">Save As</button>
+                </div>
+            </div>
+            <div class="header-menu-wrap">
+                <button id="sidebarMenuBtn" class="btn btn-small">Sidebar &#9660;</button>
+                <div id="sidebarMenu" class="header-menu" style="display:none;">
+                    <button id="treeBtn" class="header-menu-item">Actor Tree</button>
+                    <button id="pluginsBtn" class="header-menu-item">Plugins</button>
+                    <button id="workflowsBtn" class="header-menu-item">Run Panel</button>
+                </div>
+            </div>
+            <button id="importYamlHeaderBtn" class="btn btn-small">Import YAML</button>
+            <button id="runBtn" class="btn btn-run">Run</button>
             <label for="maxIterations" style="color:var(--text-secondary);font-size:12px;white-space:nowrap;">Max iter:</label>
-            <input type="number" id="maxIterations" value="100" min="1" max="999999999" style="width:110px;">
+            <input type="number" id="maxIterations" value="100" min="1" max="999999999" style="width:80px;">
             <label style="color:var(--text-secondary);font-size:12px;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="infiniteCheck"> ∞</label>
             <label for="globalDelay" style="color:var(--text-secondary);font-size:12px;white-space:nowrap;">Delay(ms):</label>
-            <input type="number" id="globalDelay" value="0" min="0" style="width:80px;">
+            <input type="number" id="globalDelay" value="0" min="0" style="width:60px;">
             <button id="applyDelayBtn" class="btn btn-small">Apply</button>
-            <button id="runBtn" class="btn btn-run">Run</button>
-            <button id="stopBtn" class="btn btn-stop" disabled>Stop</button>
-            <button id="resumeBtn" class="btn btn-resume" style="display:none">Resume</button>
             <select id="themeSelect">
                 <option value="dark-catppuccin">Dark Catppuccin</option>
                 <option value="dark-nord">Dark Nord</option>
@@ -39,7 +58,7 @@
             <div class="actor-tree-header">
                 <span class="side-tab" data-tab="actors">Actors</span>
                 <span class="side-tab" data-tab="plugins">Plugins</span>
-                <span class="side-tab" data-tab="workflows">Workflows</span>
+                <span class="side-tab" data-tab="run">Run</span>
                 <button id="sidePanelRefresh" class="btn btn-small" title="Refresh">&#8635;</button>
                 <button id="sidePanelClose" class="btn btn-small">&times;</button>
             </div>
@@ -55,8 +74,33 @@
             <div id="sidePanelPlugins" class="side-panel-view" style="display:none;">
                 <div id="pluginsBody" class="actor-tree-body"></div>
             </div>
-            <div id="sidePanelWorkflows" class="side-panel-view" style="display:none;">
-                <div id="workflowsBody" class="actor-tree-body"></div>
+            <div id="sidePanelRun" class="side-panel-view side-panel-run" style="display:none;">
+                <div class="run-panel-controls">
+                    <button id="paramExecute" class="btn btn-run">&#9654; Start</button>
+                    <button id="stopBtn" class="btn btn-stop" disabled>&#9632; Stop</button>
+                    <button id="resumeBtn" class="btn btn-resume" style="display:none">Resume</button>
+                </div>
+                <div class="run-panel-body">
+                    <div class="param-section">
+                        <label class="param-label">Environment parameter file:</label>
+                        <div class="param-file-row">
+                            <input type="file" id="paramFileInput" accept=".yaml,.yml" style="display:none;">
+                            <button id="paramFileBrowse" class="btn btn-small">Browse...</button>
+                            <span id="paramFileName" class="param-file-name">(none)</span>
+                            <button id="paramFileUnload" class="btn btn-small" style="display:none;">Unload</button>
+                        </div>
+                        <textarea id="paramFilePreview" class="param-file-preview" rows="5" readonly></textarea>
+                    </div>
+                    <div id="paramPreFilled" class="param-section" style="display:none;">
+                        <label class="param-label">Loaded from file:</label>
+                        <div id="paramPreFilledList" class="param-prefilled-list"></div>
+                    </div>
+                    <div id="paramRequired" class="param-section" style="display:none;">
+                        <label class="param-label">Additional parameters:</label>
+                        <div id="paramRequiredList" class="param-required-list"></div>
+                    </div>
+                    <div id="paramNoParams" class="param-no-params" style="display:none;">No parameters required.</div>
+                </div>
             </div>
         </section>
         <div id="sidePanelResizer" class="tree-resizer" style="display:none;"></div>
@@ -65,17 +109,11 @@
                 <div class="tab-bar">
                     <div id="tabList" class="tab-list"></div>
                     <button id="addTabBtn" class="btn btn-small tab-add-btn" title="New workflow tab">+</button>
+
                 </div>
-                <div class="toolbar">
-                    <button id="addStepBtn" class="btn btn-small">+ Step</button>
-                    <button id="treeBtn" class="btn btn-small" title="Actor Tree">Actor Tree</button>
-                    <button id="pluginsBtn" class="btn btn-small" title="Available Plugins">Plugins</button>
-                    <button id="workflowsBtn" class="btn btn-small" title="Available Workflows">Workflows</button>
-                    <button id="exportYamlBtn" class="btn btn-small">Export YAML</button>
-                    <button id="importYamlBtn" class="btn btn-small">Import YAML</button>
-                </div>
+
                 <div class="description-section">
-                    <textarea id="workflowDescription" placeholder="Workflow description (optional)" rows="1"></textarea>
+                    <textarea id="workflowDescription" placeholder="Workflow description (optional)" rows="2"></textarea>
                 </div>
                 <div class="table-wrapper">
                     <div id="stepsContainer"></div>
@@ -103,36 +141,20 @@
             </section>
         </div>
     </main>
-    <!-- Run Parameter Dialog -->
-    <div id="paramDialog" class="modal-overlay" style="display:none;">
-        <div class="modal-box">
-            <h2 class="modal-title">Run Workflow</h2>
 
-            <div class="param-section">
-                <label class="param-label">Environment parameter file:</label>
-                <div class="param-file-row">
-                    <select id="paramFileSelect"><option value="">(none)</option></select>
-                    <button id="paramFileLoad" class="btn btn-small">Load</button>
-                </div>
-            </div>
-
-            <div id="paramPreFilled" class="param-section" style="display:none;">
-                <label class="param-label">Loaded from file:</label>
-                <div id="paramPreFilledList" class="param-prefilled-list"></div>
-            </div>
-
-            <div id="paramRequired" class="param-section" style="display:none;">
-                <label class="param-label">Additional parameters:</label>
-                <div id="paramRequiredList" class="param-required-list"></div>
-            </div>
-
+    <!-- Edit YAML modal -->
+    <div id="editYamlOverlay" class="modal-overlay" style="display:none;">
+        <div class="modal-box" style="width:760px;height:82vh;display:flex;flex-direction:column;gap:8px;">
+            <div class="modal-title">Edit YAML</div>
+            <div id="editYamlEditor" style="flex:1;overflow:hidden;border:1px solid var(--border-color);border-radius:4px;"></div>
             <div class="modal-actions">
-                <button id="paramCancel" class="btn btn-small">Cancel</button>
-                <button id="paramRun" class="btn btn-run">Run</button>
+                <button id="editYamlApply" class="btn btn-run">Apply</button>
+                <button id="editYamlCancel" class="btn btn-small">Cancel</button>
             </div>
         </div>
     </div>
 
     <script src="app.js"></script>
+    <script type="module" src="codemirror-init.js"></script>
 </body>
 </html>

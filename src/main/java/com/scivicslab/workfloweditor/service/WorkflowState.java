@@ -27,6 +27,7 @@ public class WorkflowState {
         public volatile int maxIterations = 100;
         public volatile String description = null;
         public volatile Map<String, ParamMeta> params = new LinkedHashMap<>();
+        public volatile String filePath = null;
 
         public TabData(String name) {
             this.name = name;
@@ -141,6 +142,14 @@ public class WorkflowState {
 
     public void setParams(Map<String, ParamMeta> params) {
         active().params = params != null ? params : new LinkedHashMap<>();
+    }
+
+    public String getFilePath() {
+        return active().filePath;
+    }
+
+    public void setFilePath(String filePath) {
+        active().filePath = filePath;
     }
 
     public List<MatrixRow> getRows() {

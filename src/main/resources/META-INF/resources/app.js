@@ -5,9 +5,14 @@
     var descriptionArea = document.getElementById('workflowDescription');
     var runBtn = document.getElementById('runBtn');
     var stopBtn = document.getElementById('stopBtn');
-    var addStepBtn = document.getElementById('addStepBtn');
+    var resumeBtn = document.getElementById('resumeBtn');
+    var paramExecute = document.getElementById('paramExecute');
+    var paramNoParams = document.getElementById('paramNoParams');
+    var saveBtn = document.getElementById('saveBtn');
     var exportYamlBtn = document.getElementById('exportYamlBtn');
     var importYamlBtn = document.getElementById('importYamlBtn');
+    var newWorkflowBtn = document.getElementById('newWorkflowBtn');
+    var importYamlHeaderBtn = document.getElementById('importYamlHeaderBtn');
     var clearLogBtn = document.getElementById('clearLogBtn');
     var logOutput = document.getElementById('logOutput');
     var maxIterationsInput = document.getElementById('maxIterations');
@@ -26,7 +31,6 @@
 
     var tabList = document.getElementById('tabList');
     var addTabBtn = document.getElementById('addTabBtn');
-    var resumeBtn = document.getElementById('resumeBtn');
     var logResizer = document.getElementById('logResizer');
     var logSection = document.querySelector('.log-section');
     var logLevelSelect = document.getElementById('logLevelSelect');
@@ -270,11 +274,10 @@
               .then(function (data) {
                 if (data.status === 'ok') {
                     activeTabName = name;
-                    // data may have steps or rows
                     if (data.steps) {
                         loadFromSteps(data.name, data.description, data.steps, data.maxIterations);
-                    } else if (data.rows) {
-                        loadFromRows(data.name, data.rows, data.maxIterations);
+                    } else {
+                        console.error('Tab activate response missing steps');
                     }
                     refreshTabList();
                 }
@@ -291,7 +294,6 @@
                 name: activeTabName,
                 description: descriptionArea.value || null,
                 steps: getSteps(),
-                rows: getRows(),
                 maxIterations: getMaxIterations()
             })
         }).then(function () {
@@ -607,46 +609,11 @@
         return steps;
     }
 
-    // Flat rows for backward compat (used in run request)
-    function getRows() {
-        var steps = getSteps();
-        var rows = [];
-        for (var i = 0; i < steps.length; i++) {
-            var step = steps[i];
-            for (var j = 0; j < step.actions.length; j++) {
-                var a = step.actions[j];
-                rows.push({
-                    from: j === 0 ? step.from : '',
-                    to: j === 0 ? step.to : '',
-                    actor: a.actor,
-                    method: a.method,
-                    arguments: a.arguments
-                });
-            }
-        }
-        return rows;
-    }
-
-    // --- Add Step ---
-
-    addStepBtn.addEventListener('click', function () {
-        var groups = stepsContainer.querySelectorAll('.step-group');
-        var lastTo = '';
-        if (groups.length > 0) {
-            lastTo = groups[groups.length - 1].querySelector('.step-to').value;
-        }
-        var newGroup = createStepGroup(lastTo, '', '', '', null);
-        stepsContainer.appendChild(newGroup);
-        renumberAll();
-        newGroup.querySelector('.step-to').focus();
-        saveToLocalStorage();
-    });
-
     // --- Run / Stop ---
 
     function setRunning(running) {
         isRunning = running;
-        runBtn.disabled = running;
+        paramExecute.disabled = running;
         stopBtn.disabled = !running;
     }
 
@@ -687,17 +654,17 @@
         }
     }
 
-    // --- Run Parameter Dialog ---
+    // --- Run Parameter Panel ---
 
-    var paramDialog = document.getElementById('paramDialog');
-    var paramFileSelect = document.getElementById('paramFileSelect');
-    var paramFileLoad = document.getElementById('paramFileLoad');
+    var paramFileInput = document.getElementById('paramFileInput');
+    var paramFileBrowse = document.getElementById('paramFileBrowse');
+    var paramFileName = document.getElementById('paramFileName');
     var paramPreFilled = document.getElementById('paramPreFilled');
     var paramPreFilledList = document.getElementById('paramPreFilledList');
     var paramRequired = document.getElementById('paramRequired');
     var paramRequiredList = document.getElementById('paramRequiredList');
-    var paramCancel = document.getElementById('paramCancel');
-    var paramRun = document.getElementById('paramRun');
+    var paramFilePreview = document.getElementById('paramFilePreview');
+    var paramFileUnload = document.getElementById('paramFileUnload');
 
     var _paramLoadedVars = {};
     var _paramPendingSteps = null;
@@ -781,67 +748,88 @@
         } else {
             paramRequired.style.display = 'none';
         }
+
+        var hasAnything = preFilledKeys.length > 0 || requiredKeys.length > 0;
+        paramNoParams.style.display = hasAnything ? 'none' : '';
     }
 
     function escapeHtml(str) {
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
-    function openParamDialog(steps) {
+    function resetRunPanel(steps) {
         _paramPendingSteps = steps;
         _paramLoadedVars = {};
         _paramMeta = {};
         paramPreFilled.style.display = 'none';
         paramRequired.style.display = 'none';
+        paramFileName.textContent = '(none)';
+        paramFilePreview.value = '';
+        paramFileUnload.style.display = 'none';
+        paramFileInput.value = '';
 
-        var allVars = extractVariables(steps);
-
-        // Load file list and param metadata in parallel
-        Promise.all([
-            fetch('/api/params/files').then(function (r) { return r.json(); }).catch(function () { return []; }),
-            fetch('/api/params/meta').then(function (r) { return r.json(); }).catch(function () { return {}; })
-        ]).then(function (results) {
-            var files = results[0];
-            _paramMeta = results[1] || {};
-
-            paramFileSelect.innerHTML = '<option value="">(none)</option>';
-            files.forEach(function (f) {
-                var opt = document.createElement('option');
-                opt.value = f;
-                opt.textContent = f;
-                paramFileSelect.appendChild(opt);
+        fetch('/api/params/meta').then(function (r) { return r.json(); }).catch(function () { return {}; })
+            .then(function (meta) {
+                _paramMeta = meta || {};
+                renderParamDialog(extractVariables(steps));
             });
-
-            renderParamDialog(allVars);
-        });
-
-        paramDialog.style.display = 'flex';
     }
 
-    paramFileLoad.addEventListener('click', function () {
-        var path = paramFileSelect.value;
-        if (!path) return;
-        fetch('/api/params/load?path=' + encodeURIComponent(path))
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                _paramLoadedVars = data.vars || {};
-                renderParamDialog(extractVariables(_paramPendingSteps));
+    function openParamDialog(steps) {
+        resetRunPanel(steps);
+        showSidePanel('run');
+    }
+
+    paramFileBrowse.addEventListener('click', function () {
+        paramFileInput.click();
+    });
+
+    paramFileInput.addEventListener('change', function () {
+        var file = paramFileInput.files[0];
+        if (!file) return;
+        paramFileName.textContent = file.name;
+        var reader = new FileReader();
+        reader.onload = function (e) {
+            var content = e.target.result;
+            paramFilePreview.value = content;
+            fetch('/api/params/parse', {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: content
             })
-            .catch(function (err) { appendLog('error', 'Failed to load param file: ' + err.message); });
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    _paramLoadedVars = data.vars || {};
+                    renderParamDialog(extractVariables(_paramPendingSteps));
+                    paramFileUnload.style.display = 'inline-block';
+                })
+                .catch(function (err) { appendLog('error', 'Failed to parse param file: ' + err.message); });
+        };
+        reader.readAsText(file);
     });
 
-    paramCancel.addEventListener('click', function () {
-        paramDialog.style.display = 'none';
-        _paramPendingSteps = null;
+    paramFileUnload.addEventListener('click', function () {
+        _paramLoadedVars = {};
+        paramFileUnload.style.display = 'none';
+        paramFileName.textContent = '(none)';
+        paramFilePreview.value = '';
+        paramFileInput.value = '';
+        renderParamDialog(extractVariables(_paramPendingSteps));
     });
 
-    paramRun.addEventListener('click', function () {
+    document.getElementById('sidePanelRun').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && e.shiftKey) {
+            e.preventDefault();
+            paramExecute.click();
+        }
+    });
+
+    paramExecute.addEventListener('click', function () {
         var parameters = Object.assign({}, _paramLoadedVars);
         paramRequiredList.querySelectorAll('[data-param-key]').forEach(function (input) {
             if (input.value.trim()) parameters[input.dataset.paramKey] = input.value.trim();
         });
 
-        paramDialog.style.display = 'none';
         var steps = _paramPendingSteps;
         _paramPendingSteps = null;
 
@@ -870,10 +858,7 @@
 
     runBtn.addEventListener('click', function () {
         var steps = getSteps();
-        if (steps.length === 0) {
-            appendLog('error', 'No valid steps to run');
-            return;
-        }
+        if (steps.length === 0) { appendLog('error', 'No valid steps to run'); return; }
         openParamDialog(steps);
     });
 
@@ -899,7 +884,82 @@
         });
     });
 
+    // --- Edit YAML modal ---
+
+    var editYamlOverlay = document.getElementById('editYamlOverlay');
+
+    document.getElementById('editYamlBtn').addEventListener('click', function () {
+        saveCurrentTabToServer(function () {
+            fetch('/api/yaml/export')
+                .then(function (r) { return r.text(); })
+                .then(function (yamlText) {
+                    editYamlOverlay.style.display = 'flex';
+                    if (window.yamlEditorAPI) window.yamlEditorAPI.set(yamlText);
+                })
+                .catch(function (e) { appendLog('error', 'Failed to load YAML: ' + e.message); });
+        });
+    });
+
+    document.getElementById('editYamlApply').addEventListener('click', function () {
+        var yamlText = window.yamlEditorAPI ? window.yamlEditorAPI.get() : '';
+        fetch('/api/yaml/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: yamlText
+        }).then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.status === 'ok') {
+                editYamlOverlay.style.display = 'none';
+                loadFromServer();
+                appendLog('info', 'YAML applied');
+            } else {
+                appendLog('error', 'Apply failed: ' + (data.message || 'unknown error'));
+            }
+        }).catch(function (e) { appendLog('error', 'Apply failed: ' + e.message); });
+    });
+
+    document.getElementById('editYamlCancel').addEventListener('click', function () {
+        editYamlOverlay.style.display = 'none';
+    });
+
+    editYamlOverlay.addEventListener('click', function (e) {
+        if (e.target === editYamlOverlay) editYamlOverlay.style.display = 'none';
+    });
+
     // --- Export YAML ---
+
+    saveBtn.addEventListener('click', function () {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+        fetch('/api/workflows/save', { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.status === 'ok') {
+                    saveBtn.textContent = 'Saved ✓';
+                    saveBtn.style.background = 'var(--accent-green)';
+                    addLog('Saved to ' + data.path, 'step');
+                } else {
+                    saveBtn.textContent = 'Error ✗';
+                    saveBtn.style.background = 'var(--accent-red)';
+                    addLog('Save failed: ' + data.message, 'error');
+                }
+                setTimeout(function () {
+                    saveBtn.textContent = 'Save';
+                    saveBtn.style.background = '';
+                    saveBtn.disabled = false;
+                }, 2000);
+            })
+            .catch(function (e) {
+                saveBtn.textContent = 'Error ✗';
+                saveBtn.style.background = 'var(--accent-red)';
+                addLog('Save error: ' + e, 'error');
+                setTimeout(function () {
+                    saveBtn.textContent = 'Save';
+                    saveBtn.style.background = '';
+                    saveBtn.disabled = false;
+                }, 2000);
+            });
+    });
 
     exportYamlBtn.addEventListener('click', function () {
         var steps = getSteps();
@@ -953,7 +1013,7 @@
 
     // --- Import YAML ---
 
-    importYamlBtn.addEventListener('click', function () {
+    function doImportYaml() {
         var input = document.createElement('input');
         input.type = 'file';
         input.accept = '.yaml,.yml';
@@ -968,6 +1028,21 @@
             reader.readAsText(file);
         };
         input.click();
+    }
+
+    importYamlBtn.addEventListener('click', doImportYaml);
+    importYamlHeaderBtn.addEventListener('click', doImportYaml);
+
+    newWorkflowBtn.addEventListener('click', function () {
+        var name = prompt('Workflow name:', 'new-workflow');
+        if (!name || !name.trim()) return;
+        loadFromSteps(name.trim(), '', [{
+            states: ['0', '1'],
+            label: '',
+            note: '',
+            actions: [{ actor: '', method: '', arguments: '' }]
+        }], 100);
+        appendLog('info', 'New workflow created: ' + name.trim());
     });
 
     function parseAndLoadYaml(yaml) {
@@ -1016,45 +1091,11 @@
         }
         renumberAll();
         saveToLocalStorage();
-    }
 
-    // Load from flat rows (backward compat)
-    function loadFromRows(name, rows, maxIterations) {
-        var steps = rowsToSteps(rows);
-        loadFromSteps(name, null, steps, maxIterations);
-    }
-
-    // Convert flat rows to steps (client-side)
-    function rowsToSteps(rows) {
-        if (!rows || rows.length === 0) return [];
-        var steps = [];
-        var curFrom = null, curTo = null;
-        var curActions = null;
-
-        for (var i = 0; i < rows.length; i++) {
-            var r = rows[i];
-            var isNew = r.from && r.from !== '' && r.to && r.to !== '';
-            if (isNew) {
-                if (curFrom !== null && curActions !== null) {
-                    steps.push({ from: curFrom, to: curTo, label: null, note: null, actions: curActions });
-                }
-                curFrom = r.from;
-                curTo = r.to;
-                curActions = [];
-            }
-            if (curActions !== null) {
-                curActions.push({ actor: r.actor, method: r.method, arguments: r.arguments });
-            }
+        // Refresh Run panel content if it's currently open (without toggling visibility)
+        if (activeSideTab === 'run' && sidePanel.style.display !== 'none') {
+            resetRunPanel(getSteps());
         }
-        if (curFrom !== null && curActions !== null) {
-            steps.push({ from: curFrom, to: curTo, label: null, note: null, actions: curActions });
-        }
-        return steps;
-    }
-
-    // Legacy alias
-    function loadTableFromData(name, rows, maxIterations) {
-        loadFromRows(name, rows, maxIterations);
     }
 
     // --- Utility ---
@@ -1085,7 +1126,8 @@
                     if (dto.steps) {
                         loadFromSteps(dto.name, dto.description, dto.steps, dto.maxIterations);
                     } else {
-                        loadFromRows(dto.name, dto.rows, dto.maxIterations);
+                        console.error('Workflow response missing steps');
+                        loadFromSteps(dto.name, dto.description, null, dto.maxIterations);
                     }
                 });
             } else {
@@ -1125,6 +1167,23 @@
     });
 
     // --- Actor Tree Browser ---
+
+    function setupMenu(btnId, menuId) {
+        var btn = document.getElementById(btnId);
+        var menu = document.getElementById(menuId);
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var isOpen = menu.style.display !== 'none';
+            document.querySelectorAll('.header-menu').forEach(function (m) { m.style.display = 'none'; });
+            menu.style.display = isOpen ? 'none' : 'block';
+        });
+        menu.addEventListener('click', function () { menu.style.display = 'none'; });
+    }
+    setupMenu('fileMenuBtn', 'fileMenu');
+    setupMenu('sidebarMenuBtn', 'sidebarMenu');
+    document.addEventListener('click', function () {
+        document.querySelectorAll('.header-menu').forEach(function (m) { m.style.display = 'none'; });
+    });
 
     var treeBtn = document.getElementById('treeBtn');
     var pluginsBtn = document.getElementById('pluginsBtn');
@@ -1170,7 +1229,7 @@
         // Show correct view
         document.getElementById('sidePanelActors').style.display = tab === 'actors' ? 'flex' : 'none';
         document.getElementById('sidePanelPlugins').style.display = tab === 'plugins' ? 'flex' : 'none';
-        document.getElementById('sidePanelWorkflows').style.display = tab === 'workflows' ? 'flex' : 'none';
+        document.getElementById('sidePanelRun').style.display = tab === 'run' ? 'flex' : 'none';
 
         // Fetch data and manage polling
         if (tab === 'actors') {
@@ -1179,13 +1238,14 @@
         } else {
             stopActorTreePolling();
             if (tab === 'plugins') fetchPlugins();
-            else if (tab === 'workflows') fetchWorkflows();
         }
     }
 
     treeBtn.addEventListener('click', function () { showSidePanel('actors'); });
     pluginsBtn.addEventListener('click', function () { showSidePanel('plugins'); });
-    workflowsBtn.addEventListener('click', function () { showSidePanel('workflows'); });
+    workflowsBtn.addEventListener('click', function () {
+        openParamDialog(getSteps());
+    });
     sidePanelClose.addEventListener('click', function () {
         sidePanel.style.display = 'none';
         sidePanelResizer.style.display = 'none';
@@ -1194,7 +1254,6 @@
     sidePanelRefresh.addEventListener('click', function () {
         if (activeSideTab === 'actors') fetchActorTree();
         else if (activeSideTab === 'plugins') fetchPlugins();
-        else if (activeSideTab === 'workflows') fetchWorkflows();
     });
 
     // Tab clicks within the header

@@ -284,121 +284,6 @@ public class WorkflowRunner {
     }
 
     /**
-     * Runs a workflow from matrix rows.
-     */
-    public void run(String name, List<MatrixRow> rows, int maxIterations, Level logLevel, Consumer<WorkflowEvent> emitter) {
-        if (!running.compareAndSet(false, true)) {
-            emitter.accept(new WorkflowEvent("error", "Workflow already running", null, null));
-            return;
-        }
-        stopRequested = false;
-        resetMilestone();
-
-        // Set log level for workflow logger
-        var workflowLogger = java.util.logging.Logger.getLogger("workflow");
-        var prevLevel = workflowLogger.getLevel();
-        if (logLevel != null) {
-            workflowLogger.setLevel(logLevel);
-        }
-
-        // When OFF, filter out step/info events; pass output/completed/error/stopped
-        final Consumer<WorkflowEvent> effectiveEmitter;
-        if (logLevel == Level.OFF) {
-            effectiveEmitter = event -> {
-                String type = event.type();
-                if (!"step".equals(type) && !"info".equals(type)) {
-                    emitter.accept(event);
-                }
-            };
-        } else {
-            effectiveEmitter = emitter;
-        }
-
-        // Wire output listeners so actor output streams to SSE
-        Consumer<String> outputForwarder = msg ->
-                effectiveEmitter.accept(new WorkflowEvent("output", msg, null, null));
-        setOutputListeners(outputForwarder);
-
-        // Intercept stdout/stderr during execution
-        var origOut = System.out;
-        var origErr = System.err;
-        System.setOut(new java.io.PrintStream(new OutputInterceptor(origOut, line ->
-                effectiveEmitter.accept(new WorkflowEvent("output", line, null, null))), true));
-        System.setErr(new java.io.PrintStream(new OutputInterceptor(origErr, line ->
-                effectiveEmitter.accept(new WorkflowEvent("output", "[stderr] " + line, null, null))), true));
-
-        try {
-            String workflowName = name != null ? name : "workflow";
-            String yaml = toYaml(workflowName, rows);
-            logger.fine("Generated YAML:\n" + yaml);
-            effectiveEmitter.accept(new WorkflowEvent("info", "Workflow started: " + workflowName, null, null));
-
-            // Reuse the default interpreter actor
-            Interpreter interpreter = currentInterpreter;
-            interpreter.reset();
-
-            interpreter.setBreakpointListener((transition, state) ->
-                    effectiveEmitter.accept(new WorkflowEvent("paused",
-                            "Breakpoint at state: " + state, state, null)));
-
-            interpreter.setActionFailureListener((transition, state, result) -> {
-                String failMsg = "Action failed at state '" + state + "' transition "
-                        + transition.getStates() + ": " + result.getResult();
-                logger.finest(failMsg);
-                effectiveEmitter.accept(new WorkflowEvent("finest", failMsg, state, null));
-            });
-
-            interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
-            emitActorTree(effectiveEmitter);
-
-            int iteration = 0;
-            while (iteration < maxIterations && !stopRequested) {
-                ActionResult result = interpreter.execCode();
-                String currentState = interpreter.getCurrentState();
-                emitActorTree(effectiveEmitter);
-
-                if (result == null || !result.isSuccess()) {
-                    if ("end".equals(currentState)) {
-                        effectiveEmitter.accept(new WorkflowEvent("completed", "Workflow completed", currentState, null));
-                    } else if (interpreter.isStopRequested()) {
-                        effectiveEmitter.accept(new WorkflowEvent("stopped", "Workflow stopped by user", currentState, null));
-                    } else {
-                        String msg = result != null ? result.getResult() : "No matching transition from state: " + currentState;
-                        effectiveEmitter.accept(new WorkflowEvent("error", msg, currentState, null));
-                    }
-                    break;
-                }
-
-                effectiveEmitter.accept(new WorkflowEvent("fine", result.getResult(), currentState, null));
-                iteration++;
-
-                if ("end".equals(interpreter.getCurrentState())) {
-                    effectiveEmitter.accept(new WorkflowEvent("completed", "Workflow completed", "end", null));
-                    break;
-                }
-            }
-
-            if (iteration >= maxIterations) {
-                effectiveEmitter.accept(new WorkflowEvent("warning", "Max iterations reached (" + maxIterations + ")", null, null));
-            }
-            if (stopRequested && !interpreter.isStopRequested()) {
-                effectiveEmitter.accept(new WorkflowEvent("stopped", "Workflow stopped by user", null, null));
-            }
-
-        } catch (Exception e) {
-            logger.log(Level.WARNING, "Workflow execution failed", e);
-            effectiveEmitter.accept(new WorkflowEvent("error", "Execution failed: " + e.getMessage(), null, null));
-        } finally {
-            // Do not null out currentInterpreter - it is the default interpreter actor, reused across runs
-            System.setOut(origOut);
-            System.setErr(origErr);
-            setOutputListeners(null);
-            workflowLogger.setLevel(prevLevel);
-            running.set(false);
-        }
-    }
-
-    /**
      * OutputStream that intercepts line-by-line output and forwards to a callback,
      * while also writing to the original stream.
      */
@@ -614,44 +499,6 @@ public class WorkflowRunner {
     }
 
     /**
-     * Converts matrix rows to POJO-actor YAML format.
-     */
-    public static String toYaml(String name, List<MatrixRow> rows) {
-        var sb = new StringBuilder();
-        sb.append("name: ").append(yamlEscape(name)).append("\n");
-        sb.append("steps:\n");
-
-        boolean inTransition = false;
-
-        for (var row : rows) {
-            boolean isNewTransition = row.from() != null && !row.from().isEmpty()
-                    && row.to() != null && !row.to().isEmpty();
-
-            if (isNewTransition) {
-                sb.append("  - states: [\"").append(escapeYamlString(row.from()))
-                  .append("\", \"").append(escapeYamlString(row.to())).append("\"]\n");
-                sb.append("    actions:\n");
-                inTransition = true;
-            }
-
-            if (inTransition) {
-                appendAction(sb, row);
-            }
-        }
-
-        return sb.toString();
-    }
-
-    private static void appendAction(StringBuilder sb, MatrixRow row) {
-        sb.append("      - actor: ").append(yamlEscape(row.actor())).append("\n");
-        sb.append("        method: ").append(yamlEscape(row.method())).append("\n");
-        if (row.arguments() != null && !row.arguments().isEmpty()) {
-            String args = row.arguments();
-            appendYamlArguments(sb, args, "        ");
-        }
-    }
-
-    /**
      * Appends arguments to YAML using block scalar (|) for multiline values
      * and double-quoted strings for single-line values.
      */
@@ -823,13 +670,84 @@ public class WorkflowRunner {
 
     /**
      * Substitutes ${key} placeholders in yaml with values from parameters map.
+     *
+     * <p>Three YAML string contexts are handled:</p>
+     * <ul>
+     *   <li>Double-quoted: {@code "${key}"} — escapes \, ", and control chars as YAML escape sequences</li>
+     *   <li>Single-quoted: {@code '${key}'} — escapes ' as '' (YAML single-quoted rule)</li>
+     *   <li>Embedded in double-quoted: {@code "prefix ${key} suffix"} — same escaping as double-quoted</li>
+     * </ul>
+     * SnakeYAML automatically reverses the escape sequences when parsing the resulting YAML.
      */
     public static String applyParameters(String yaml, Map<String, String> parameters) {
         if (parameters == null || parameters.isEmpty()) return yaml;
         for (var entry : parameters.entrySet()) {
-            yaml = yaml.replace("${" + entry.getKey() + "}", entry.getValue());
+            String key = entry.getKey();
+            String value = entry.getValue();
+            String placeholder = "${" + key + "}";
+
+            // Replace placeholder inside double-quoted YAML strings (embedded or standalone)
+            // e.g. "${key}" or "prefix ${key} suffix"
+            String dqEscaped = yamlDoubleQuoteEscape(value);
+            yaml = replaceInsideDoubleQuotedYaml(yaml, placeholder, dqEscaped);
+
+            // Replace standalone single-quoted YAML string: '${key}'
+            String sqPlaceholder = "'" + placeholder + "'";
+            if (yaml.contains(sqPlaceholder)) {
+                yaml = yaml.replace(sqPlaceholder, "'" + value.replace("'", "''") + "'");
+            }
+
+            // Replace remaining occurrences (e.g. embedded in single-quoted strings like '...${key}...')
+            // Single-quoted YAML: escape ' as '' only
+            if (yaml.contains(placeholder)) {
+                yaml = yaml.replace(placeholder, value.replace("'", "''"));
+            }
         }
         return yaml;
+    }
+
+    /** Escapes a value for embedding in a YAML double-quoted string. */
+    private static String yamlDoubleQuoteEscape(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    /**
+     * Replaces all occurrences of {@code placeholder} that appear inside YAML double-quoted strings
+     * (i.e., between non-escaped {@code "} pairs) with {@code replacement}.
+     */
+    private static String replaceInsideDoubleQuotedYaml(String yaml, String placeholder, String replacement) {
+        if (!yaml.contains(placeholder)) return yaml;
+        StringBuilder result = new StringBuilder();
+        int i = 0;
+        while (i < yaml.length()) {
+            if (yaml.charAt(i) == '"') {
+                // Find the closing unescaped "
+                int start = i;
+                int j = i + 1;
+                while (j < yaml.length()) {
+                    if (yaml.charAt(j) == '\\') { j += 2; continue; }
+                    if (yaml.charAt(j) == '"') break;
+                    j++;
+                }
+                // yaml[start..j] is a double-quoted string (including the quotes)
+                String inner = yaml.substring(start + 1, j);
+                if (inner.contains(placeholder)) {
+                    result.append('"').append(inner.replace(placeholder, replacement)).append('"');
+                } else {
+                    result.append(yaml, start, j + 1);
+                }
+                i = j + 1;
+            } else {
+                result.append(yaml.charAt(i));
+                i++;
+            }
+        }
+        return result.toString();
     }
 
     /**
