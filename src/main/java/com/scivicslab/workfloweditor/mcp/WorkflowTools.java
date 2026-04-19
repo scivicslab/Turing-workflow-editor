@@ -111,7 +111,7 @@ public class WorkflowTools {
     String exportYaml() {
         return WorkflowRunner.toYamlStructured(
                 state.getName(), state.getDescription(),
-                WorkflowRunner.rowsToSteps(state.getRows()));
+                state.getSteps());
     }
 
     @Tool(description = "Import a YAML workflow into the editor")
@@ -119,8 +119,7 @@ public class WorkflowTools {
             @ToolArg(description = "The YAML workflow to import") String yaml
     ) {
         WorkflowRunner.ParsedWorkflow parsed = WorkflowRunner.fromYaml(yaml);
-        var rows = WorkflowRunner.stepsToRows(parsed.steps());
-        state.replaceAll(parsed.name(), rows, state.getMaxIterations());
+        state.replaceAll(parsed.name(), parsed.steps(), state.getMaxIterations());
         if (parsed.description() != null) {
             state.setDescription(parsed.description());
         }

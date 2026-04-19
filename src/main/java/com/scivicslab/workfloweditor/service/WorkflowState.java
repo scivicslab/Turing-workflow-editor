@@ -1,7 +1,8 @@
 package com.scivicslab.workfloweditor.service;
 
-import com.scivicslab.workfloweditor.rest.WorkflowResource.MatrixRow;
+import com.scivicslab.workfloweditor.service.WorkflowRunner.ActionDto;
 import com.scivicslab.workfloweditor.service.WorkflowRunner.ParamMeta;
+import com.scivicslab.workfloweditor.service.WorkflowRunner.StepDto;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.ArrayList;
@@ -9,7 +10,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Server-side holder for multiple workflow definitions (tabs).
@@ -23,7 +23,7 @@ public class WorkflowState {
 
     public static class TabData {
         public final String name;
-        public final CopyOnWriteArrayList<MatrixRow> rows = new CopyOnWriteArrayList<>();
+        public final List<StepDto> steps = new ArrayList<>();
         public volatile int maxIterations = 100;
         public volatile String description = null;
         public volatile Map<String, ParamMeta> params = new LinkedHashMap<>();
@@ -95,7 +95,7 @@ public class WorkflowState {
             if (entry.getKey().equals(oldName)) {
                 var data = entry.getValue();
                 var renamed = new TabData(newName);
-                renamed.rows.addAll(data.rows);
+                renamed.steps.addAll(data.steps);
                 renamed.maxIterations = data.maxIterations;
                 newTabs.put(newName, renamed);
             } else {
@@ -152,180 +152,137 @@ public class WorkflowState {
         active().filePath = filePath;
     }
 
-    public List<MatrixRow> getRows() {
-        return Collections.unmodifiableList(new ArrayList<>(active().rows));
+    public List<StepDto> getSteps() {
+        return Collections.unmodifiableList(new ArrayList<>(active().steps));
     }
 
     public int size() {
-        return active().rows.size();
+        return active().steps.size();
     }
 
-    public synchronized void replaceAll(String name, List<MatrixRow> newRows, int maxIterations) {
+    public synchronized void replaceAll(String name, List<StepDto> newSteps, int maxIterations) {
         String tabName = name != null ? name : "workflow";
         // If a tab with this name exists, update it and activate it
         if (tabs.containsKey(tabName)) {
             var tab = tabs.get(tabName);
-            tab.rows.clear();
-            if (newRows != null) tab.rows.addAll(newRows);
+            tab.steps.clear();
+            if (newSteps != null) tab.steps.addAll(newSteps);
             tab.maxIterations = maxIterations > 0 ? maxIterations : 100;
             activeTab = tabName;
         } else {
             // Create new tab
             var tab = new TabData(tabName);
-            if (newRows != null) tab.rows.addAll(newRows);
+            if (newSteps != null) tab.steps.addAll(newSteps);
             tab.maxIterations = maxIterations > 0 ? maxIterations : 100;
             tabs.put(tabName, tab);
             activeTab = tabName;
         }
     }
 
-    public synchronized int addStep(MatrixRow row, Integer index) {
-        var rows = active().rows;
+    public synchronized int addStep(StepDto step, Integer index) {
+        var steps = active().steps;
         if (index != null) {
-            if (index < 0 || index > rows.size()) {
-                throw new IndexOutOfBoundsException("Index " + index + " out of range [0, " + rows.size() + "]");
+            if (index < 0 || index > steps.size()) {
+                throw new IndexOutOfBoundsException("Index " + index + " out of range [0, " + steps.size() + "]");
             }
-            rows.add(index, row);
+            steps.add(index, step);
             return index;
         }
-        rows.add(row);
-        return rows.size() - 1;
+        steps.add(step);
+        return steps.size() - 1;
     }
 
-    public synchronized void updateStep(int index, MatrixRow row) {
-        var rows = active().rows;
-        if (index < 0 || index >= rows.size()) {
-            throw new IndexOutOfBoundsException("Index " + index + " out of range [0, " + rows.size() + ")");
+    public synchronized void updateStep(int index, StepDto step) {
+        var steps = active().steps;
+        if (index < 0 || index >= steps.size()) {
+            throw new IndexOutOfBoundsException("Index " + index + " out of range [0, " + steps.size() + ")");
         }
-        rows.set(index, row);
+        steps.set(index, step);
     }
 
-    public synchronized MatrixRow deleteStep(int index) {
-        var rows = active().rows;
-        if (index < 0 || index >= rows.size()) {
-            throw new IndexOutOfBoundsException("Index " + index + " out of range [0, " + rows.size() + ")");
+    public synchronized StepDto deleteStep(int index) {
+        var steps = active().steps;
+        if (index < 0 || index >= steps.size()) {
+            throw new IndexOutOfBoundsException("Index " + index + " out of range [0, " + steps.size() + ")");
         }
-        return rows.remove(index);
+        return steps.remove(index);
     }
 
     // --- Transition / sub-action helpers ---
 
     public synchronized List<Map<String, Object>> getTransitions() {
-        var rows = active().rows;
         List<Map<String, Object>> transitions = new ArrayList<>();
-        Map<String, Object> current = null;
-        List<Map<String, String>> currentActions = null;
-
-        for (var row : rows) {
-            boolean isTransition = row.from() != null && !row.from().isEmpty()
-                    && row.to() != null && !row.to().isEmpty();
-
-            if (isTransition) {
-                current = new LinkedHashMap<>();
-                current.put("from", row.from());
-                current.put("to", row.to());
-                currentActions = new ArrayList<>();
-                current.put("actions", currentActions);
-                transitions.add(current);
+        for (var step : active().steps) {
+            var transition = new LinkedHashMap<String, Object>();
+            transition.put("from", step.from());
+            transition.put("to", step.to());
+            List<Map<String, String>> actionList = new ArrayList<>();
+            if (step.actions() != null) {
+                for (var action : step.actions()) {
+                    var actionMap = new LinkedHashMap<String, String>();
+                    actionMap.put("actor", action.actor());
+                    actionMap.put("method", action.method());
+                    actionMap.put("arguments", action.arguments());
+                    actionList.add(actionMap);
+                }
             }
-
-            if (currentActions != null) {
-                var action = new LinkedHashMap<String, String>();
-                action.put("actor", row.actor());
-                action.put("method", row.method());
-                action.put("arguments", row.arguments());
-                currentActions.add(action);
-            }
+            transition.put("actions", actionList);
+            transitions.add(transition);
         }
         return transitions;
     }
 
-    private int transitionStartIndex(int tIndex) {
-        var rows = active().rows;
-        int t = -1;
-        for (int i = 0; i < rows.size(); i++) {
-            var row = rows.get(i);
-            if (row.from() != null && !row.from().isEmpty()
-                    && row.to() != null && !row.to().isEmpty()) {
-                t++;
-                if (t == tIndex) return i;
-            }
+    public synchronized int addAction(int stepIndex, ActionDto action, Integer aIndex) {
+        var steps = active().steps;
+        if (stepIndex < 0 || stepIndex >= steps.size()) {
+            throw new IndexOutOfBoundsException("Step index " + stepIndex + " out of range [0, " + steps.size() + ")");
         }
-        throw new IndexOutOfBoundsException("Transition " + tIndex + " not found");
-    }
-
-    private int actionFlatIndex(int tIndex, int aIndex) {
-        var rows = active().rows;
-        int start = transitionStartIndex(tIndex);
-        int actionCount = 0;
-        for (int i = start; i < rows.size(); i++) {
-            if (i > start) {
-                var row = rows.get(i);
-                if (row.from() != null && !row.from().isEmpty()
-                        && row.to() != null && !row.to().isEmpty()) {
-                    break;
-                }
-            }
-            if (actionCount == aIndex) return i;
-            actionCount++;
-        }
-        throw new IndexOutOfBoundsException(
-                "Action " + aIndex + " not found in transition " + tIndex + " (has " + actionCount + " actions)");
-    }
-
-    private int transitionEndIndex(int tIndex) {
-        var rows = active().rows;
-        int start = transitionStartIndex(tIndex);
-        int end = start + 1;
-        for (int i = start + 1; i < rows.size(); i++) {
-            var row = rows.get(i);
-            if (row.from() != null && !row.from().isEmpty()
-                    && row.to() != null && !row.to().isEmpty()) {
-                break;
-            }
-            end = i + 1;
-        }
-        return end;
-    }
-
-    public synchronized int addAction(int tIndex, MatrixRow action, Integer aIndex) {
-        var rows = active().rows;
+        var step = steps.get(stepIndex);
+        var newActions = new ArrayList<>(step.actions() != null ? step.actions() : List.of());
+        int insertAt;
         if (aIndex != null) {
-            int insertAt;
-            if (aIndex <= 0) {
-                insertAt = transitionStartIndex(tIndex) + 1;
-            } else {
-                insertAt = actionFlatIndex(tIndex, aIndex);
+            if (aIndex < 0 || aIndex > newActions.size()) {
+                throw new IndexOutOfBoundsException("Action index " + aIndex + " out of range [0, " + newActions.size() + "]");
             }
-            var subRow = new MatrixRow("", "", action.actor(), action.method(), action.arguments());
-            rows.add(insertAt, subRow);
-            return aIndex;
+            newActions.add(aIndex, action);
+            insertAt = aIndex;
+        } else {
+            newActions.add(action);
+            insertAt = newActions.size() - 1;
         }
-        int insertAt = transitionEndIndex(tIndex);
-        var subRow = new MatrixRow("", "", action.actor(), action.method(), action.arguments());
-        rows.add(insertAt, subRow);
-        return insertAt - transitionStartIndex(tIndex);
+        steps.set(stepIndex, new StepDto(step.from(), step.to(), step.label(), step.note(),
+                step.delay(), step.breakpoint(), newActions));
+        return insertAt;
     }
 
-    public synchronized void updateAction(int tIndex, int aIndex, MatrixRow action) {
-        var rows = active().rows;
-        int flatIdx = actionFlatIndex(tIndex, aIndex);
-        var existing = rows.get(flatIdx);
-        var updated = new MatrixRow(existing.from(), existing.to(), action.actor(), action.method(), action.arguments());
-        rows.set(flatIdx, updated);
+    public synchronized void updateAction(int stepIndex, int aIndex, ActionDto action) {
+        var steps = active().steps;
+        if (stepIndex < 0 || stepIndex >= steps.size()) {
+            throw new IndexOutOfBoundsException("Step index " + stepIndex + " out of range [0, " + steps.size() + ")");
+        }
+        var step = steps.get(stepIndex);
+        var newActions = new ArrayList<>(step.actions() != null ? step.actions() : List.of());
+        if (aIndex < 0 || aIndex >= newActions.size()) {
+            throw new IndexOutOfBoundsException("Action index " + aIndex + " out of range [0, " + newActions.size() + ")");
+        }
+        newActions.set(aIndex, action);
+        steps.set(stepIndex, new StepDto(step.from(), step.to(), step.label(), step.note(),
+                step.delay(), step.breakpoint(), newActions));
     }
 
-    public synchronized MatrixRow deleteAction(int tIndex, int aIndex) {
-        var rows = active().rows;
-        int flatIdx = actionFlatIndex(tIndex, aIndex);
-        if (aIndex == 0) {
-            int end = transitionEndIndex(tIndex);
-            List<MatrixRow> removed = new ArrayList<>();
-            for (int i = end - 1; i >= flatIdx; i--) {
-                removed.add(rows.remove(i));
-            }
-            return removed.get(removed.size() - 1);
+    public synchronized ActionDto deleteAction(int stepIndex, int aIndex) {
+        var steps = active().steps;
+        if (stepIndex < 0 || stepIndex >= steps.size()) {
+            throw new IndexOutOfBoundsException("Step index " + stepIndex + " out of range [0, " + steps.size() + ")");
         }
-        return rows.remove(flatIdx);
+        var step = steps.get(stepIndex);
+        var newActions = new ArrayList<>(step.actions() != null ? step.actions() : List.of());
+        if (aIndex < 0 || aIndex >= newActions.size()) {
+            throw new IndexOutOfBoundsException("Action index " + aIndex + " out of range [0, " + newActions.size() + ")");
+        }
+        ActionDto removed = newActions.remove(aIndex);
+        steps.set(stepIndex, new StepDto(step.from(), step.to(), step.label(), step.note(),
+                step.delay(), step.breakpoint(), newActions));
+        return removed;
     }
 }

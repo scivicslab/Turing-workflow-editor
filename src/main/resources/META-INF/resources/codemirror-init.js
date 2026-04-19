@@ -1,7 +1,4 @@
-import { EditorView, basicSetup } from 'https://esm.sh/codemirror@6';
-import { yaml } from 'https://esm.sh/@codemirror/lang-yaml@6';
-import { oneDark } from 'https://esm.sh/@codemirror/theme-one-dark@6';
-import { Compartment } from 'https://esm.sh/@codemirror/state@6';
+import { EditorView, basicSetup, yaml, oneDark, Compartment } from '/codemirror-bundle.js';
 
 const themeCompartment = new Compartment();
 

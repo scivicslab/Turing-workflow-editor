@@ -894,7 +894,9 @@
                 .then(function (r) { return r.text(); })
                 .then(function (yamlText) {
                     editYamlOverlay.style.display = 'flex';
-                    if (window.yamlEditorAPI) window.yamlEditorAPI.set(yamlText);
+                    requestAnimationFrame(function () {
+                        if (window.yamlEditorAPI) window.yamlEditorAPI.set(yamlText);
+                    });
                 })
                 .catch(function (e) { appendLog('error', 'Failed to load YAML: ' + e.message); });
         });

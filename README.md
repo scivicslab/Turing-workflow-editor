@@ -25,6 +25,8 @@ A web UI for editing and executing [POJO-actor](https://github.com/scivicslab/PO
 
 ## Build & Run
 
+**Prerequisites:** Java 21+, Maven 3.9+
+
 ```bash
 cd Turing-workflow-editor
 rm -rf target
@@ -39,6 +41,27 @@ java -jar turing-workflow-editor-<version>.jar
 ```
 
 Starts on port 8091 by default (configurable in `application.properties`).
+
+### Rebuilding the CodeMirror bundle (optional)
+
+The pre-built `codemirror-bundle.js` is committed to the repository — **Node.js is not required for normal builds**.  
+Only rebuild it when upgrading CodeMirror or adding new editor extensions:
+
+```bash
+cd /tmp/cm-bundle
+npm install codemirror @codemirror/lang-yaml @codemirror/theme-one-dark @codemirror/state
+npx esbuild entry.js --bundle --format=esm --outfile=codemirror-bundle.js --minify
+cp codemirror-bundle.js <project>/src/main/resources/META-INF/resources/
+```
+
+Where `entry.js` re-exports the required symbols:
+
+```javascript
+export { EditorView, basicSetup } from 'codemirror';
+export { yaml } from '@codemirror/lang-yaml';
+export { oneDark } from '@codemirror/theme-one-dark';
+export { Compartment } from '@codemirror/state';
+```
 
 ## REST API
 

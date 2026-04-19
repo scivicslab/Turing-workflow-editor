@@ -1,9 +1,9 @@
 package com.scivicslab.workfloweditor.rest;
 
 import com.scivicslab.pojoactor.core.ActionResult;
-import com.scivicslab.workfloweditor.rest.WorkflowResource.MatrixRow;
 import com.scivicslab.workfloweditor.rest.WorkflowResource.WorkflowEvent;
 import com.scivicslab.workfloweditor.service.WorkflowRunner;
+import com.scivicslab.workfloweditor.service.WorkflowRunner.ActionDto;
 import com.scivicslab.workfloweditor.service.WorkflowRunner.StepDto;
 import com.scivicslab.workfloweditor.service.WorkflowState;
 import jakarta.inject.Inject;
@@ -45,7 +45,7 @@ public class WorkflowApiResource {
         var dto = new WorkflowDto();
         dto.name = state.getName();
         dto.description = state.getDescription();
-        dto.steps = WorkflowRunner.rowsToSteps(state.getRows());
+        dto.steps = state.getSteps();
         dto.maxIterations = state.getMaxIterations();
         return dto;
     }
@@ -58,8 +58,7 @@ public class WorkflowApiResource {
         if (dto.steps == null || dto.steps.isEmpty()) {
             return Map.of("status", "error", "message", "No workflow steps provided");
         }
-        List<MatrixRow> rows = WorkflowRunner.stepsToRows(dto.steps);
-        state.replaceAll(dto.name, rows, dto.maxIterations != null ? dto.maxIterations : 100);
+        state.replaceAll(dto.name, dto.steps, dto.maxIterations != null ? dto.maxIterations : 100);
         if (dto.description != null) {
             state.setDescription(dto.description);
         }
@@ -71,9 +70,9 @@ public class WorkflowApiResource {
     @Path("/workflow/steps")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public Response addStep(MatrixRow row, @QueryParam("index") Integer index) {
+    public Response addStep(StepDto step, @QueryParam("index") Integer index) {
         try {
-            int idx = state.addStep(row, index);
+            int idx = state.addStep(step, index);
             return Response.ok(Map.of("status", "ok", "index", idx)).build();
         } catch (IndexOutOfBoundsException e) {
             return Response.status(400).entity(Map.of("status", "error", "message", e.getMessage())).build();
@@ -84,9 +83,9 @@ public class WorkflowApiResource {
     @Path("/workflow/steps/{index}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public Response updateStep(@PathParam("index") int index, MatrixRow row) {
+    public Response updateStep(@PathParam("index") int index, StepDto step) {
         try {
-            state.updateStep(index, row);
+            state.updateStep(index, step);
             return Response.ok(Map.of("status", "ok")).build();
         } catch (IndexOutOfBoundsException e) {
             return Response.status(404).entity(Map.of("status", "error", "message", e.getMessage())).build();
@@ -98,7 +97,7 @@ public class WorkflowApiResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response deleteStep(@PathParam("index") int index) {
         try {
-            MatrixRow removed = state.deleteStep(index);
+            StepDto removed = state.deleteStep(index);
             return Response.ok(Map.of("status", "ok", "removed", removed)).build();
         } catch (IndexOutOfBoundsException e) {
             return Response.status(404).entity(Map.of("status", "error", "message", e.getMessage())).build();
@@ -113,7 +112,7 @@ public class WorkflowApiResource {
     public String exportYaml() {
         return WorkflowRunner.toYamlStructured(
                 state.getName(), state.getDescription(),
-                WorkflowRunner.rowsToSteps(state.getRows()),
+                state.getSteps(),
                 state.getParams());
     }
 
@@ -124,8 +123,7 @@ public class WorkflowApiResource {
     public Map<String, Object> importYaml(String yaml) {
         try {
             WorkflowRunner.ParsedWorkflow parsed = WorkflowRunner.fromYaml(yaml);
-            List<MatrixRow> rows = WorkflowRunner.stepsToRows(parsed.steps());
-            state.replaceAll(parsed.name(), rows, state.getMaxIterations());
+            state.replaceAll(parsed.name(), parsed.steps(), state.getMaxIterations());
             if (parsed.description() != null) {
                 state.setDescription(parsed.description());
             }
@@ -150,9 +148,8 @@ public class WorkflowApiResource {
         }
 
         WorkflowRunner.ParsedWorkflow parsed = WorkflowRunner.fromYaml(yaml);
-        List<MatrixRow> rows = WorkflowRunner.stepsToRows(parsed.steps());
         int maxIter = maxIterations != null && maxIterations > 0 ? maxIterations : state.getMaxIterations();
-        state.replaceAll(parsed.name(), rows, maxIter);
+        state.replaceAll(parsed.name(), parsed.steps(), maxIter);
 
         notifyStateChanged("YAML workflow started: " + parsed.name());
         var emitter = workflowResource.getSseEmitter();
@@ -199,7 +196,7 @@ public class WorkflowApiResource {
     @Path("/workflow/transitions/{tIndex}/actions")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public Response addAction(@PathParam("tIndex") int tIndex, MatrixRow action,
+    public Response addAction(@PathParam("tIndex") int tIndex, ActionDto action,
                               @QueryParam("index") Integer aIndex) {
         try {
             int idx = state.addAction(tIndex, action, aIndex);
@@ -214,7 +211,7 @@ public class WorkflowApiResource {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Response updateAction(@PathParam("tIndex") int tIndex, @PathParam("aIndex") int aIndex,
-                                 MatrixRow action) {
+                                 ActionDto action) {
         try {
             state.updateAction(tIndex, aIndex, action);
             return Response.ok(Map.of("status", "ok")).build();
@@ -228,7 +225,7 @@ public class WorkflowApiResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response deleteAction(@PathParam("tIndex") int tIndex, @PathParam("aIndex") int aIndex) {
         try {
-            MatrixRow removed = state.deleteAction(tIndex, aIndex);
+            ActionDto removed = state.deleteAction(tIndex, aIndex);
             return Response.ok(Map.of("status", "ok", "removed", removed)).build();
         } catch (IndexOutOfBoundsException e) {
             return Response.status(404).entity(Map.of("status", "error", "message", e.getMessage())).build();
@@ -271,7 +268,7 @@ public class WorkflowApiResource {
         if (state.activateTab(name)) {
             return Response.ok(Map.of("status", "ok",
                     "name", state.getName(),
-                    "steps", WorkflowRunner.rowsToSteps(state.getRows()),
+                    "steps", state.getSteps(),
                     "maxIterations", state.getMaxIterations())).build();
         }
         return Response.status(404).entity(Map.of("status", "error", "message", "Tab not found: " + name)).build();
@@ -497,8 +494,7 @@ public class WorkflowApiResource {
         try {
             String yaml = java.nio.file.Files.readString(java.nio.file.Path.of(path));
             WorkflowRunner.ParsedWorkflow parsed = WorkflowRunner.fromYaml(yaml);
-            List<MatrixRow> rows = WorkflowRunner.stepsToRows(parsed.steps());
-            state.replaceAll(parsed.name(), rows, state.getMaxIterations());
+            state.replaceAll(parsed.name(), parsed.steps(), state.getMaxIterations());
             if (parsed.description() != null) {
                 state.setDescription(parsed.description());
             }
@@ -522,7 +518,7 @@ public class WorkflowApiResource {
         try {
             String yaml = WorkflowRunner.toYamlStructured(
                     state.getName(), state.getDescription(),
-                    WorkflowRunner.rowsToSteps(state.getRows()));
+                    state.getSteps());
             rotateBackups(filePath, 5);
             java.nio.file.Files.writeString(java.nio.file.Path.of(filePath), yaml);
             notifyStateChanged("Workflow saved: " + filePath);

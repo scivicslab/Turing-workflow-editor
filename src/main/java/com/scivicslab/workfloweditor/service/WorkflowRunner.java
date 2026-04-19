@@ -6,7 +6,6 @@ import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.Interpreter;
 import com.scivicslab.turingworkflow.workflow.InterpreterIIAR;
-import com.scivicslab.workfloweditor.rest.WorkflowResource.MatrixRow;
 import com.scivicslab.workfloweditor.rest.WorkflowResource.WorkflowEvent;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 import jakarta.annotation.PostConstruct;
@@ -748,54 +747,6 @@ public class WorkflowRunner {
             }
         }
         return result.toString();
-    }
-
-    /**
-     * Converts structured steps to flat MatrixRow list for backward compatibility.
-     */
-    public static List<MatrixRow> stepsToRows(List<StepDto> steps) {
-        List<MatrixRow> rows = new ArrayList<>();
-        for (var step : steps) {
-            boolean first = true;
-            for (var action : step.actions()) {
-                if (first) {
-                    rows.add(new MatrixRow(step.from(), step.to(), action.actor(), action.method(), action.arguments()));
-                    first = false;
-                } else {
-                    rows.add(new MatrixRow("", "", action.actor(), action.method(), action.arguments()));
-                }
-            }
-        }
-        return rows;
-    }
-
-    /**
-     * Converts flat MatrixRow list to structured steps (loses label/note).
-     */
-    public static List<StepDto> rowsToSteps(List<MatrixRow> rows) {
-        List<StepDto> steps = new ArrayList<>();
-        String curFrom = null, curTo = null;
-        List<ActionDto> curActions = null;
-
-        for (var row : rows) {
-            boolean isNew = row.from() != null && !row.from().isEmpty()
-                    && row.to() != null && !row.to().isEmpty();
-            if (isNew) {
-                if (curFrom != null && curActions != null) {
-                    steps.add(new StepDto(curFrom, curTo, null, null, null, null, curActions));
-                }
-                curFrom = row.from();
-                curTo = row.to();
-                curActions = new ArrayList<>();
-            }
-            if (curActions != null) {
-                curActions.add(new ActionDto(row.actor(), row.method(), row.arguments()));
-            }
-        }
-        if (curFrom != null && curActions != null) {
-            steps.add(new StepDto(curFrom, curTo, null, null, null, null, curActions));
-        }
-        return steps;
     }
 
     @RegisterForReflection

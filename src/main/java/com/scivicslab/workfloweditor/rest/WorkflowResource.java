@@ -120,8 +120,7 @@ public class WorkflowResource {
             final String yaml = WorkflowRunner.applyParameters(
                 WorkflowRunner.toYamlStructured(request.name, null, request.steps),
                 request.parameters);
-            List<MatrixRow> rows = WorkflowRunner.stepsToRows(request.steps);
-            workflowState.replaceAll(request.name, rows, maxIter);
+            workflowState.replaceAll(request.name, request.steps, maxIter);
             Thread.startVirtualThread(() -> {
                 try {
                     runner.runYaml(yaml, maxIter, logLevel, this::emitSse);

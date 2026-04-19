@@ -48,8 +48,7 @@ public class WorkflowAutoloader {
         try {
             String yaml = Files.readString(file);
             var parsed = WorkflowRunner.fromYaml(yaml);
-            var rows = WorkflowRunner.stepsToRows(parsed.steps());
-            state.replaceAll(parsed.name(), rows, state.getMaxIterations());
+            state.replaceAll(parsed.name(), parsed.steps(), state.getMaxIterations());
             if (parsed.description() != null) {
                 state.setDescription(parsed.description());
             }
