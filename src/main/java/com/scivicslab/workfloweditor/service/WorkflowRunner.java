@@ -379,6 +379,7 @@ public class WorkflowRunner {
                 effectiveEmitter.accept(new WorkflowEvent("output", "[stderr] " + line, null, null))), true));
 
         try {
+            yaml = expandEnvVars(yaml);
             logger.fine("Running YAML directly:\n" + yaml);
             effectiveEmitter.accept(new WorkflowEvent("info", "Workflow started (YAML)", null, null));
 
@@ -665,6 +666,21 @@ public class WorkflowRunner {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Expands ${ENV_VAR} placeholders in yaml using process environment variables.
+     * Called automatically at the start of runYaml() so workflow files can reference
+     * runtime context (e.g. ${MCP_GATEWAY_URL}) without hardcoding values.
+     */
+    static String expandEnvVars(String yaml) {
+        for (var entry : System.getenv().entrySet()) {
+            String placeholder = "${" + entry.getKey() + "}";
+            if (yaml.contains(placeholder)) {
+                yaml = yaml.replace(placeholder, entry.getValue());
+            }
+        }
+        return yaml;
     }
 
     /**

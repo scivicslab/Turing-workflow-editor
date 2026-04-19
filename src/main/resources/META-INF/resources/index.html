@@ -77,8 +77,14 @@
             <div id="sidePanelRun" class="side-panel-view side-panel-run" style="display:none;">
                 <div class="run-panel-controls">
                     <button id="paramExecute" class="btn btn-run">&#9654; Start</button>
+                    <button id="createBatchJobBtn" class="btn btn-batch">&#43; Batch Job</button>
                     <button id="stopBtn" class="btn btn-stop" disabled>&#9632; Stop</button>
                     <button id="resumeBtn" class="btn btn-resume" style="display:none">Resume</button>
+                </div>
+                <div id="batchJobResult" class="batch-job-result" style="display:none;">
+                    <span class="batch-job-label">Job ID:</span>
+                    <span id="batchJobId" class="batch-job-id"></span>
+                    <button id="batchJobCopy" class="btn btn-small">Copy</button>
                 </div>
                 <div class="run-panel-body">
                     <div class="param-section">

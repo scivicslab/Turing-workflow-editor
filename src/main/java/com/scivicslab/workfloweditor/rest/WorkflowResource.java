@@ -197,6 +197,37 @@ public class WorkflowResource {
     }
 
     /**
+     * Runs a workflow from a YAML string with optional parameter substitution.
+     */
+    @POST
+    @Path("/yaml/run")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, String> runYaml(YamlRunRequest request) {
+        if (runner.isRunning()) {
+            return Map.of("status", "error", "message", "Workflow already running");
+        }
+        if (request == null || request.yaml == null || request.yaml.isBlank()) {
+            return Map.of("status", "error", "message", "No YAML provided");
+        }
+        int maxIter = (request.maxIterations != null && request.maxIterations > 0) ? request.maxIterations : 100;
+        String yaml = request.yaml;
+        if (request.parameters != null && !request.parameters.isEmpty()) {
+            yaml = WorkflowRunner.applyParameters(yaml, request.parameters);
+        }
+        final String finalYaml = yaml;
+        Thread.startVirtualThread(() -> {
+            try {
+                runner.runYaml(finalYaml, maxIter, null, this::emitSse);
+            } catch (Exception e) {
+                logger.log(Level.WARNING, "YAML run failed", e);
+                emitSse(new WorkflowEvent("error", e.getMessage(), null, null));
+            }
+        });
+        return Map.of("status", "started");
+    }
+
+    /**
      * Stops a running workflow.
      */
     @POST
@@ -278,6 +309,13 @@ public class WorkflowResource {
         public List<StepDto> steps;
         public Integer maxIterations;
         public String logLevel;
+        public Map<String, String> parameters;
+    }
+
+    @RegisterForReflection
+    public static class YamlRunRequest {
+        public String yaml;
+        public Integer maxIterations;
         public Map<String, String> parameters;
     }
 

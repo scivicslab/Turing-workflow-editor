@@ -65,6 +65,16 @@
             <version>2.4</version>
         </dependency>
 
+        <!-- H2 + Hibernate Panache for batch job queue -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-hibernate-orm-panache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jdbc-h2</artifactId>
+        </dependency>
+
         <!-- MCP Server (HTTP transport) -->
         <dependency>
             <groupId>io.quarkiverse.mcp</groupId>

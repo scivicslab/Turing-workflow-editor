@@ -767,6 +767,7 @@
         paramFilePreview.value = '';
         paramFileUnload.style.display = 'none';
         paramFileInput.value = '';
+        document.getElementById('batchJobResult').style.display = 'none';
 
         fetch('/api/params/meta').then(function (r) { return r.json(); }).catch(function () { return {}; })
             .then(function (meta) {
@@ -860,6 +861,44 @@
         var steps = getSteps();
         if (steps.length === 0) { appendLog('error', 'No valid steps to run'); return; }
         openParamDialog(steps);
+    });
+
+    var createBatchJobBtn = document.getElementById('createBatchJobBtn');
+    var batchJobResult = document.getElementById('batchJobResult');
+    var batchJobIdSpan = document.getElementById('batchJobId');
+    var batchJobCopy = document.getElementById('batchJobCopy');
+
+    createBatchJobBtn.addEventListener('click', function () {
+        var parameters = Object.assign({}, _paramLoadedVars);
+        var paramRequiredList = document.getElementById('paramRequiredList');
+        paramRequiredList.querySelectorAll('[data-param-key]').forEach(function (input) {
+            if (input.value.trim()) parameters[input.dataset.paramKey] = input.value.trim();
+        });
+
+        fetch('/api/batch/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parameters: parameters })
+        }).then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.jobId) {
+                batchJobIdSpan.textContent = data.jobId;
+                batchJobResult.style.display = 'flex';
+                appendLog('info', 'Batch job created: ' + data.jobId);
+            } else {
+                appendLog('error', 'Failed to create batch job: ' + (data.error || 'unknown'));
+            }
+        }).catch(function (err) {
+            appendLog('error', 'Failed to create batch job: ' + err.message);
+        });
+    });
+
+    batchJobCopy.addEventListener('click', function () {
+        navigator.clipboard.writeText(batchJobIdSpan.textContent).then(function () {
+            var orig = batchJobCopy.textContent;
+            batchJobCopy.textContent = 'Copied!';
+            setTimeout(function () { batchJobCopy.textContent = orig; }, 2000);
+        });
     });
 
     stopBtn.addEventListener('click', function () {
