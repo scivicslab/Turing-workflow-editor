@@ -772,7 +772,11 @@
         fetch('/api/params/meta').then(function (r) { return r.json(); }).catch(function () { return {}; })
             .then(function (meta) {
                 _paramMeta = meta || {};
-                renderParamDialog(extractVariables(steps));
+                var vars = extractVariables(steps);
+                Object.keys(_paramMeta).forEach(function (k) {
+                    if (vars.indexOf(k) === -1) vars.push(k);
+                });
+                renderParamDialog(vars);
             });
     }
 
