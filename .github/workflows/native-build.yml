@@ -22,19 +22,13 @@ jobs:
           distribution: 'temurin'
 
       - name: Build uber-JAR
-        run: mvn package -Dquarkus.package.type=uber-jar -DskipTests
+        run: mvn package -DskipTests
 
-      - name: Rename artifact
+      - name: Copy artifact
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          SRC=$(ls target/turing-workflow-editor-*-runner.jar 2>/dev/null || echo "")
-          if [ -z "$SRC" ]; then
-            echo "::error::uber-JAR not found in target/"
-            ls -la target/
-            exit 1
-          fi
-          cp "${SRC}" "turing-workflow-editor-${TAG}.jar"
-          echo "ARTIFACT=turing-workflow-editor-${TAG}.jar" >> $GITHUB_ENV
+          VERSION="${GITHUB_REF_NAME#v}"
+          cp "target/turing-workflow-editor-${VERSION}.jar" "turing-workflow-editor-${VERSION}.jar"
+          echo "ARTIFACT=turing-workflow-editor-${VERSION}.jar" >> $GITHUB_ENV
 
       - uses: actions/upload-artifact@v4
         with:

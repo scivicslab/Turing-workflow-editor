@@ -1272,8 +1272,8 @@ a.actor-action-link:hover {
 }
 
 .step-label {
-    width: 30%;
-    min-width: 120px;
+    flex: 1;
+    min-width: 100px;
     background: var(--input-bg);
     border: 1px solid transparent;
     color: var(--text-secondary);
@@ -1281,10 +1281,9 @@ a.actor-action-link:hover {
     border-radius: 3px;
     font-size: 12px;
     font-style: italic;
-    resize: none;
-    overflow: hidden;
+    resize: vertical;
+    overflow: auto;
     min-height: 24px;
-    height: 24px;
     line-height: 1.4;
     font-family: inherit;
     margin: 0 3px 0 6px;
@@ -1310,10 +1309,9 @@ a.actor-action-link:hover {
     padding: 3px 6px;
     border-radius: 3px;
     font-size: 12px;
-    resize: none;
-    overflow: hidden;
+    resize: vertical;
+    overflow: auto;
     min-height: 24px;
-    height: 24px;
     line-height: 1.4;
     font-family: inherit;
     margin: 0 6px 0 6px;
@@ -1386,7 +1384,7 @@ a.actor-action-link:hover {
 .action-table .col-act-actions { width: 50px; min-width: 50px; text-align: center; }
 
 .action-table td {
-    padding: 1px 3px;
+    padding: 0;
     border-bottom: 1px solid var(--border-color);
     vertical-align: middle;
 }
