@@ -487,7 +487,7 @@
             var row = createActionRow('', '', '');
             tbody.appendChild(row);
             renumberAll();
-            row.querySelector('.col-act-actor').focus();
+            row.querySelector('.col-act-actor input').focus();
             saveToLocalStorage();
         });
 
@@ -527,15 +527,15 @@
 
         tr.innerHTML =
             '<td class="act-num"></td>' +
-            '<td><input class="col-act-actor" type="text" value="' + escapeAttr(actor || '') + '" placeholder="actor"></td>' +
-            '<td><input class="col-act-method" type="text" value="' + escapeAttr(method || '') + '" placeholder="method"></td>' +
-            '<td><textarea class="col-act-args" placeholder="arguments" rows="1">' + escapeAttr(args || '') + '</textarea></td>' +
+            '<td class="col-act-actor"><input type="text" value="' + escapeAttr(actor || '') + '" placeholder="actor"></td>' +
+            '<td class="col-act-method"><input type="text" value="' + escapeAttr(method || '') + '" placeholder="method"></td>' +
+            '<td class="col-act-args"><textarea placeholder="arguments" rows="1">' + escapeAttr(args || '') + '</textarea></td>' +
             '<td><div class="act-row-actions">' +
             '<button class="act-delete-btn" title="Delete action">&times;</button>' +
             '</div></td>';
 
         // Auto-resize textarea
-        var argsArea = tr.querySelector('.col-act-args');
+        var argsArea = tr.querySelector('.col-act-args textarea');
         argsArea.addEventListener('input', function () { autoResize(this); });
         setTimeout(function () { autoResize(argsArea); }, 0);
 
@@ -595,9 +595,9 @@
             var actionRows = g.querySelectorAll('.action-table tbody tr');
             for (var j = 0; j < actionRows.length; j++) {
                 var tr = actionRows[j];
-                var actor = tr.querySelector('.col-act-actor').value.trim();
-                var method = tr.querySelector('.col-act-method').value.trim();
-                var args = tr.querySelector('.col-act-args').value;
+                var actor = tr.querySelector('.col-act-actor input').value.trim();
+                var method = tr.querySelector('.col-act-method input').value.trim();
+                var args = tr.querySelector('.col-act-args textarea').value;
                 step.actions.push({
                     actor: actor,
                     method: method,
