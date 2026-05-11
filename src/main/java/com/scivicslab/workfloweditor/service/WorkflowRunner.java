@@ -394,7 +394,7 @@ public class WorkflowRunner {
         var origOut = System.out;
         var origErr = System.err;
         System.setOut(new java.io.PrintStream(new OutputInterceptor(origOut, line ->
-                effectiveEmitter.accept(new WorkflowEvent("output", line, null, null))), true, StandardCharsets.UTF_8));
+                forwardOrSubworkflowEvent(line, effectiveEmitter)), true, StandardCharsets.UTF_8));
         System.setErr(new java.io.PrintStream(new OutputInterceptor(origErr, line ->
                 effectiveEmitter.accept(new WorkflowEvent("output", "[stderr] " + line, null, null))), true, StandardCharsets.UTF_8));
 
@@ -483,6 +483,32 @@ public class WorkflowRunner {
             turingWorkflowLogger.setLevel(prevTuringWorkflowLevel);
             running.set(false);
         }
+    }
+
+    private static void forwardOrSubworkflowEvent(String line, Consumer<WorkflowEvent> emitter) {
+        if (line.startsWith("[SUBWORKFLOW_START:") && line.endsWith("]")) {
+            String inner = line.substring(19, line.length() - 1);
+            int lastColon = inner.lastIndexOf(':');
+            if (lastColon > 0) {
+                String name = inner.substring(0, lastColon);
+                int depth = Integer.parseInt(inner.substring(lastColon + 1));
+                emitter.accept(new WorkflowEvent("subworkflow-start", null, null, null, null,
+                        Map.of("name", name, "depth", depth)));
+                return;
+            }
+        }
+        if (line.startsWith("[SUBWORKFLOW_END:") && line.endsWith("]")) {
+            String inner = line.substring(17, line.length() - 1);
+            int lastColon = inner.lastIndexOf(':');
+            if (lastColon > 0) {
+                String name = inner.substring(0, lastColon);
+                int depth = Integer.parseInt(inner.substring(lastColon + 1));
+                emitter.accept(new WorkflowEvent("subworkflow-end", null, null, null, null,
+                        Map.of("name", name, "depth", depth)));
+                return;
+            }
+        }
+        emitter.accept(new WorkflowEvent("output", line, null, null));
     }
 
     private void setOutputListeners(Consumer<String> listener) {

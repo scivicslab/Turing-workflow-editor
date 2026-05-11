@@ -134,6 +134,14 @@
                     updateQueueDisplay(event.data && event.data.items, event.data && event.data.busy);
                     return;
                 }
+                if (event.type === 'subworkflow-start') {
+                    onSubworkflowStart(event.data && event.data.name, event.data && event.data.depth);
+                    return;
+                }
+                if (event.type === 'subworkflow-end') {
+                    onSubworkflowEnd(event.data && event.data.name, event.data && event.data.depth);
+                    return;
+                }
                 if (event.type === 'paused') {
                     resumeBtn.style.display = 'inline-block';
                 }
@@ -648,6 +656,33 @@
             });
         }
         stopBtn.disabled = !busy;
+    }
+
+    // --- Subworkflow Tab Tracking ---
+
+    var subworkflowTabStack = []; // [{name, prevTab}]
+
+    function onSubworkflowStart(name, depth) {
+        if (!name) return;
+        addLog('Subworkflow started: ' + name + ' (depth ' + depth + ')', 'info');
+        subworkflowTabStack.push({ name: name, prevTab: activeTabName, depth: depth });
+        // Switch to the subworkflow tab if it exists
+        fetch('/api/tabs').then(function (r) { return r.json(); })
+            .then(function (data) {
+                var tabs = data.tabs || [];
+                if (tabs.indexOf(name) >= 0) {
+                    switchTab(name);
+                }
+            });
+    }
+
+    function onSubworkflowEnd(name, depth) {
+        if (!name) return;
+        addLog('Subworkflow ended: ' + name + ' (depth ' + depth + ')', 'info');
+        var entry = subworkflowTabStack.pop();
+        if (entry && entry.prevTab && entry.prevTab !== activeTabName) {
+            switchTab(entry.prevTab);
+        }
     }
 
     // --- Queue Item Detail Modal ---
@@ -1674,23 +1709,37 @@
                     }
                 }
             }
-            // Step highlighting: find the interpreter's current state from the tree
+            // Step highlighting: find the deepest RUNNING interpreter in the tree
             if (isRunning) {
-                for (var j = 0; j < actorTreeData.length; j++) {
-                    if (actorTreeData[j].isInterpreter && actorTreeData[j].currentState) {
-                        var state = actorTreeData[j].currentState;
-                        var groups = stepsContainer.querySelectorAll('.step-group');
-                        for (var k = 0; k < groups.length; k++) {
-                            var to = groups[k].querySelector('.step-to').value.trim();
-                            if (to === state) {
-                                groups[k].classList.remove('step-running');
-                                groups[k].classList.add('step-done');
-                                break;
-                            }
-                        }
-                        highlightStep(state);
+                var activeInterp = null;
+                // Prefer deepest RUNNING interpreter (subworkflow takes priority)
+                for (var j = actorTreeData.length - 1; j >= 0; j--) {
+                    if (actorTreeData[j].isInterpreter && actorTreeData[j].status === 'RUNNING') {
+                        activeInterp = actorTreeData[j];
                         break;
                     }
+                }
+                // Fall back to first interpreter with a state
+                if (!activeInterp) {
+                    for (var j = 0; j < actorTreeData.length; j++) {
+                        if (actorTreeData[j].isInterpreter && actorTreeData[j].currentState) {
+                            activeInterp = actorTreeData[j];
+                            break;
+                        }
+                    }
+                }
+                if (activeInterp) {
+                    var state = activeInterp.currentState;
+                    var groups = stepsContainer.querySelectorAll('.step-group');
+                    for (var k = 0; k < groups.length; k++) {
+                        var to = groups[k].querySelector('.step-to').value.trim();
+                        if (to === state) {
+                            groups[k].classList.remove('step-running');
+                            groups[k].classList.add('step-done');
+                            break;
+                        }
+                    }
+                    highlightStep(state);
                 }
             }
         }
