@@ -504,6 +504,74 @@ main {
     gap: 12px;
 }
 
+.queue-area {
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+}
+
+.queue-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.queue-count {
+    color: var(--text-muted, var(--text-secondary));
+    font-weight: normal;
+}
+
+.queue-list {
+    display: flex;
+    flex-direction: column;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.queue-item {
+    display: flex;
+    align-items: center;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: var(--text-primary);
+    gap: 6px;
+    border-top: 1px solid var(--border-color);
+}
+
+.queue-item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.queue-item-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    flex-shrink: 0;
+}
+
+.queue-item-remove:hover {
+    color: var(--text-primary);
+}
+
+.queue-empty {
+    color: var(--text-muted, var(--text-secondary));
+    font-style: italic;
+    font-size: 0.85em;
+}
+
 /* Plugin/Workflow items in side panel */
 .browse-item {
     display: flex;
@@ -1451,6 +1519,10 @@ a.actor-action-link:hover {
 
 .act-row-actions button.act-delete-btn:hover {
     color: var(--accent-red);
+}
+
+.act-row-actions button.act-insert-btn:hover {
+    color: var(--accent-green, #4caf50);
 }
 
 /* --- Run Parameter Dialog --- */

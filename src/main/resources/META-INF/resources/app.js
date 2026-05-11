@@ -125,25 +125,13 @@
                 }
                 appendLog(event.type, event.message);
 
-                // Highlight the step currently being executed
-                if (isRunning && event.state) {
-                    // The previous step (whose to = event.state) just finished
-                    // Mark it as done, then highlight the next step (whose from = event.state)
-                    var groups = stepsContainer.querySelectorAll('.step-group');
-                    for (var i = 0; i < groups.length; i++) {
-                        var to = groups[i].querySelector('.step-to').value.trim();
-                        if (to === event.state) {
-                            groups[i].classList.remove('step-running');
-                            groups[i].classList.add('step-done');
-                            break;
-                        }
-                    }
-                    highlightStep(event.state);
-                }
-
                 if (event.type === 'state-changed') {
                     console.log('state-changed -> calling loadFromServer');
                     loadFromServer();
+                    return;
+                }
+                if (event.type === 'queue-changed') {
+                    updateQueueDisplay(event.data && event.data.items, event.data && event.data.busy);
                     return;
                 }
                 if (event.type === 'paused') {
@@ -531,6 +519,7 @@
             '<td class="col-act-method"><input type="text" value="' + escapeAttr(method || '') + '" placeholder="method"></td>' +
             '<td class="col-act-args"><textarea placeholder="arguments" rows="1">' + escapeAttr(args || '') + '</textarea></td>' +
             '<td><div class="act-row-actions">' +
+            '<button class="act-insert-btn" title="Insert action above">+</button>' +
             '<button class="act-delete-btn" title="Delete action">&times;</button>' +
             '</div></td>';
 
@@ -538,6 +527,16 @@
         var argsArea = tr.querySelector('.col-act-args textarea');
         argsArea.addEventListener('input', function () { autoResize(this); });
         setTimeout(function () { autoResize(argsArea); }, 0);
+
+        // Insert action above
+        tr.querySelector('.act-insert-btn').addEventListener('click', function () {
+            var tbody = tr.parentNode;
+            var newRow = createActionRow('', '', '');
+            tbody.insertBefore(newRow, tr);
+            renumberActions(tbody);
+            saveToLocalStorage();
+            newRow.querySelector('.col-act-actor input').focus();
+        });
 
         // Delete action
         tr.querySelector('.act-delete-btn').addEventListener('click', function () {
@@ -613,8 +612,41 @@
 
     function setRunning(running) {
         isRunning = running;
-        paramExecute.disabled = running;
         stopBtn.disabled = !running;
+    }
+
+    var queueArea = document.getElementById('queueArea');
+    var queueList = document.getElementById('queueList');
+    var queueCount = document.getElementById('queueCount');
+
+    function updateQueueDisplay(items, busy) {
+        queueArea.style.display = 'block';
+        if (!items || items.length === 0) {
+            queueCount.textContent = '';
+            queueList.innerHTML = '<span class="queue-empty">empty</span>';
+        } else {
+            queueCount.textContent = '(' + items.length + ')';
+            queueList.innerHTML = '';
+            items.forEach(function (item) {
+                var div = document.createElement('div');
+                div.className = 'queue-item';
+                div.dataset.queueId = item.id;
+                var name = document.createElement('span');
+                name.className = 'queue-item-name';
+                name.textContent = item.name;
+                var btn = document.createElement('button');
+                btn.className = 'queue-item-remove';
+                btn.textContent = '\u00d7';
+                btn.title = 'Remove from queue';
+                btn.addEventListener('click', function () {
+                    fetch('/api/queue/' + item.id, { method: 'DELETE' });
+                });
+                div.appendChild(name);
+                div.appendChild(btn);
+                queueList.appendChild(div);
+            });
+        }
+        stopBtn.disabled = !busy;
     }
 
     // --- Step Highlighting ---
@@ -667,7 +699,6 @@
     var paramFileUnload = document.getElementById('paramFileUnload');
 
     var _paramLoadedVars = {};
-    var _paramPendingSteps = null;
 
     function extractVariables(steps) {
         var found = {};
@@ -757,8 +788,7 @@
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
-    function resetRunPanel(steps) {
-        _paramPendingSteps = steps;
+    function resetRunPanel() {
         _paramLoadedVars = {};
         _paramMeta = {};
         paramPreFilled.style.display = 'none';
@@ -772,7 +802,7 @@
         fetch('/api/params/meta').then(function (r) { return r.json(); }).catch(function () { return {}; })
             .then(function (meta) {
                 _paramMeta = meta || {};
-                var vars = extractVariables(steps);
+                var vars = extractVariables(getSteps());
                 Object.keys(_paramMeta).forEach(function (k) {
                     if (vars.indexOf(k) === -1) vars.push(k);
                 });
@@ -780,8 +810,8 @@
             });
     }
 
-    function openParamDialog(steps) {
-        resetRunPanel(steps);
+    function openParamDialog() {
+        resetRunPanel();
         showSidePanel('run');
     }
 
@@ -805,7 +835,7 @@
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     _paramLoadedVars = data.vars || {};
-                    renderParamDialog(extractVariables(_paramPendingSteps));
+                    renderParamDialog(extractVariables(getSteps()));
                     paramFileUnload.style.display = 'inline-block';
                 })
                 .catch(function (err) { appendLog('error', 'Failed to parse param file: ' + err.message); });
@@ -819,7 +849,7 @@
         paramFileName.textContent = '(none)';
         paramFilePreview.value = '';
         paramFileInput.value = '';
-        renderParamDialog(extractVariables(_paramPendingSteps));
+        renderParamDialog(extractVariables(getSteps()));
     });
 
     document.getElementById('sidePanelRun').addEventListener('keydown', function (e) {
@@ -835,8 +865,11 @@
             if (input.value.trim()) parameters[input.dataset.paramKey] = input.value.trim();
         });
 
-        var steps = _paramPendingSteps;
-        _paramPendingSteps = null;
+        var steps = getSteps();
+        if (steps.length === 0) {
+            appendLog('error', 'No valid steps to run');
+            return;
+        }
 
         setRunning(true);
         clearAllHighlights();
@@ -862,9 +895,8 @@
     });
 
     runBtn.addEventListener('click', function () {
-        var steps = getSteps();
-        if (steps.length === 0) { appendLog('error', 'No valid steps to run'); return; }
-        openParamDialog(steps);
+        if (getSteps().length === 0) { appendLog('error', 'No valid steps to run'); return; }
+        openParamDialog();
     });
 
     var createBatchJobBtn = document.getElementById('createBatchJobBtn');
@@ -976,6 +1008,7 @@
     saveBtn.addEventListener('click', function () {
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
+        saveCurrentTabToServer(function () {
         fetch('/api/workflows/save', { method: 'POST' })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -1004,6 +1037,7 @@
                     saveBtn.disabled = false;
                 }, 2000);
             });
+        }); // end saveCurrentTabToServer
     });
 
     exportYamlBtn.addEventListener('click', function () {
@@ -1082,7 +1116,8 @@
         var name = prompt('Workflow name:', 'new-workflow');
         if (!name || !name.trim()) return;
         loadFromSteps(name.trim(), '', [{
-            states: ['0', '1'],
+            from: '0',
+            to: '1',
             label: '',
             note: '',
             actions: [{ actor: '', method: '', arguments: '' }]
@@ -1548,6 +1583,25 @@
                             selectActorDetail(actorTreeData[i]);
                             break;
                         }
+                    }
+                }
+            }
+            // Step highlighting: find the interpreter's current state from the tree
+            if (isRunning) {
+                for (var j = 0; j < actorTreeData.length; j++) {
+                    if (actorTreeData[j].isInterpreter && actorTreeData[j].currentState) {
+                        var state = actorTreeData[j].currentState;
+                        var groups = stepsContainer.querySelectorAll('.step-group');
+                        for (var k = 0; k < groups.length; k++) {
+                            var to = groups[k].querySelector('.step-to').value.trim();
+                            if (to === state) {
+                                groups[k].classList.remove('step-running');
+                                groups[k].classList.add('step-done');
+                                break;
+                            }
+                        }
+                        highlightStep(state);
+                        break;
                     }
                 }
             }

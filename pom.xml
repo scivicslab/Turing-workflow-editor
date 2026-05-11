@@ -48,14 +48,14 @@
         <dependency>
             <groupId>com.scivicslab</groupId>
             <artifactId>pojo-actor</artifactId>
-            <version>3.0.0</version>
+            <version>3.5.0</version>
         </dependency>
 
         <!-- Turing-workflow engine -->
         <dependency>
             <groupId>com.scivicslab</groupId>
             <artifactId>turing-workflow</artifactId>
-            <version>3.0.1</version>
+            <version>3.5.0</version>
         </dependency>
 
         <!-- YAML parsing -->
@@ -86,6 +86,14 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- E2E: Java Playwright -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>1.52.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

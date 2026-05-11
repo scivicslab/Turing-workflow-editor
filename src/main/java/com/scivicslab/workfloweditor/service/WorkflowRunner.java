@@ -11,6 +11,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -182,7 +183,11 @@ public class WorkflowRunner {
      * Sub-workflow child interpreters are named "subwf-{baseName}-{timestamp}-{random}".
      */
     private String getInterpreterWorkflowFile(IIActorRef<?> actor) {
-        String name = actor.getName();
+        return workflowFileFromActorName(actor.getName());
+    }
+
+    // Package-private for testing
+    static String workflowFileFromActorName(String name) {
         if (name != null && name.startsWith("subwf-")) {
             // Extract base name from "subwf-{baseName}-{timestamp}-{random}"
             String rest = name.substring(6); // remove "subwf-"
@@ -274,6 +279,11 @@ public class WorkflowRunner {
     }
 
     private String buildJavadocParams(Method method) {
+        return javadocParams(method);
+    }
+
+    // Package-private for testing
+    static String javadocParams(Method method) {
         var sb = new StringBuilder();
         for (int i = 0; i < method.getParameterTypes().length; i++) {
             if (i > 0) sb.append(",");
@@ -289,7 +299,7 @@ public class WorkflowRunner {
     private static class OutputInterceptor extends java.io.OutputStream {
         private final java.io.OutputStream original;
         private final Consumer<String> lineCallback;
-        private final StringBuilder buffer = new StringBuilder();
+        private final java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
 
         OutputInterceptor(java.io.OutputStream original, Consumer<String> lineCallback) {
             this.original = original;
@@ -300,13 +310,9 @@ public class WorkflowRunner {
         public void write(int b) throws java.io.IOException {
             original.write(b);
             if (b == '\n') {
-                String line = buffer.toString();
-                buffer.setLength(0);
-                if (!line.isEmpty()) {
-                    lineCallback.accept(line);
-                }
+                emitLine();
             } else {
-                buffer.append((char) b);
+                buffer.write(b);
             }
         }
 
@@ -315,13 +321,9 @@ public class WorkflowRunner {
             original.write(buf, off, len);
             for (int i = off; i < off + len; i++) {
                 if (buf[i] == '\n') {
-                    String line = buffer.toString();
-                    buffer.setLength(0);
-                    if (!line.isEmpty()) {
-                        lineCallback.accept(line);
-                    }
+                    emitLine();
                 } else {
-                    buffer.append((char) buf[i]);
+                    buffer.write(buf[i]);
                 }
             }
         }
@@ -329,9 +331,17 @@ public class WorkflowRunner {
         @Override
         public void flush() throws java.io.IOException {
             original.flush();
-            if (buffer.length() > 0) {
-                lineCallback.accept(buffer.toString());
-                buffer.setLength(0);
+            if (buffer.size() > 0) {
+                lineCallback.accept(buffer.toString(StandardCharsets.UTF_8));
+                buffer.reset();
+            }
+        }
+
+        private void emitLine() {
+            String line = buffer.toString(StandardCharsets.UTF_8);
+            buffer.reset();
+            if (!line.isEmpty()) {
+                lineCallback.accept(line);
             }
         }
     }
@@ -347,11 +357,16 @@ public class WorkflowRunner {
         stopRequested = false;
         resetMilestone();
 
-        // Set log level for workflow logger
-        var workflowLogger = java.util.logging.Logger.getLogger("workflow");
-        var prevLevel = workflowLogger.getLevel();
+        var workflowLogger     = java.util.logging.Logger.getLogger("workflow");
+        var pojoActorLogger    = java.util.logging.Logger.getLogger("com.scivicslab.pojoactor");
+        var turingWorkflowLogger = java.util.logging.Logger.getLogger("com.scivicslab.turingworkflow");
+        var prevWorkflowLevel     = workflowLogger.getLevel();
+        var prevPojoActorLevel    = pojoActorLogger.getLevel();
+        var prevTuringWorkflowLevel = turingWorkflowLogger.getLevel();
         if (logLevel != null) {
             workflowLogger.setLevel(logLevel);
+            pojoActorLogger.setLevel(logLevel);
+            turingWorkflowLogger.setLevel(logLevel);
         }
 
         // When OFF, filter out step/info events; pass output/completed/error/stopped/paused
@@ -367,6 +382,11 @@ public class WorkflowRunner {
             effectiveEmitter = emitter;
         }
 
+        SseLogHandler sseLogHandler = new SseLogHandler(effectiveEmitter);
+        workflowLogger.addHandler(sseLogHandler);
+        pojoActorLogger.addHandler(sseLogHandler);
+        turingWorkflowLogger.addHandler(sseLogHandler);
+
         Consumer<String> outputForwarder = msg ->
                 effectiveEmitter.accept(new WorkflowEvent("output", msg, null, null));
         setOutputListeners(outputForwarder);
@@ -374,14 +394,14 @@ public class WorkflowRunner {
         var origOut = System.out;
         var origErr = System.err;
         System.setOut(new java.io.PrintStream(new OutputInterceptor(origOut, line ->
-                effectiveEmitter.accept(new WorkflowEvent("output", line, null, null))), true));
+                effectiveEmitter.accept(new WorkflowEvent("output", line, null, null))), true, StandardCharsets.UTF_8));
         System.setErr(new java.io.PrintStream(new OutputInterceptor(origErr, line ->
-                effectiveEmitter.accept(new WorkflowEvent("output", "[stderr] " + line, null, null))), true));
+                effectiveEmitter.accept(new WorkflowEvent("output", "[stderr] " + line, null, null))), true, StandardCharsets.UTF_8));
 
         try {
             yaml = expandEnvVars(yaml);
             logger.fine("Running YAML directly:\n" + yaml);
-            effectiveEmitter.accept(new WorkflowEvent("info", "Workflow started (YAML)", null, null));
+            effectiveEmitter.accept(new WorkflowEvent("info", "Workflow started", null, null));
 
             // Reuse the default interpreter actor
             Interpreter interpreter = currentInterpreter;
@@ -392,27 +412,20 @@ public class WorkflowRunner {
                             "Breakpoint at state: " + state, state, null)));
 
             interpreter.setActionFailureListener((transition, state, result) -> {
-                String failMsg = "Action failed at state '" + state + "' transition "
-                        + transition.getStates() + ": " + result.getResult();
-                logger.finest(failMsg);
-                effectiveEmitter.accept(new WorkflowEvent("finest", failMsg, state, null));
+                workflowLogger.finest("Action failed at state '" + state + "' transition "
+                        + transition.getStates() + ": " + result.getResult());
             });
 
             interpreter.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
             emitActorTree(effectiveEmitter);
 
-            // Debug: log initial state and loaded transitions to both server log and SSE
-            String initMsg = "Initial state: '" + interpreter.getCurrentState() + "'";
-            logger.info(initMsg);
-            effectiveEmitter.accept(new WorkflowEvent("info", initMsg, null, null));
+            workflowLogger.info("Initial state: '" + interpreter.getCurrentState() + "'");
             if (interpreter.hasCodeLoaded()) {
                 var debugTransitions = interpreter.getCode().getTransitions();
-                effectiveEmitter.accept(new WorkflowEvent("fine", "Transition count: " + debugTransitions.size(), null, null));
+                workflowLogger.fine("Transition count: " + debugTransitions.size());
                 for (int t = 0; t < debugTransitions.size(); t++) {
                     var tr = debugTransitions.get(t);
-                    String trMsg = "  [" + t + "] states=" + tr.getStates() + " label=" + tr.getLabel();
-                    logger.fine(trMsg);
-                    effectiveEmitter.accept(new WorkflowEvent("fine", trMsg, null, null));
+                    workflowLogger.fine("  [" + t + "] states=" + tr.getStates() + " label=" + tr.getLabel());
                 }
             } else {
                 effectiveEmitter.accept(new WorkflowEvent("error", "No code loaded!", null, null));
@@ -423,12 +436,9 @@ public class WorkflowRunner {
                 ActionResult result = interpreter.execCode();
                 String currentState = interpreter.getCurrentState();
                 emitActorTree(effectiveEmitter);
-                // Debug: log each step result
-                String stepDebug = "execCode result: success=" + (result != null && result.isSuccess())
+                workflowLogger.fine("execCode result: success=" + (result != null && result.isSuccess())
                         + " state=" + currentState
-                        + " msg=" + (result != null ? result.getResult() : "null");
-                logger.fine(stepDebug);
-                effectiveEmitter.accept(new WorkflowEvent("fine", stepDebug, currentState, null));
+                        + " msg=" + (result != null ? result.getResult() : "null"));
 
                 if (result == null || !result.isSuccess()) {
                     if ("end".equals(currentState)) {
@@ -442,7 +452,7 @@ public class WorkflowRunner {
                     break;
                 }
 
-                effectiveEmitter.accept(new WorkflowEvent("fine", result.getResult(), currentState, null));
+                workflowLogger.fine(result.getResult());
                 iteration++;
 
                 if ("end".equals(interpreter.getCurrentState())) {
@@ -462,11 +472,15 @@ public class WorkflowRunner {
             logger.log(Level.WARNING, "Workflow execution failed", e);
             effectiveEmitter.accept(new WorkflowEvent("error", "Execution failed: " + e.getMessage(), null, null));
         } finally {
-            // Do not null out currentInterpreter - it is the default interpreter actor, reused across runs
+            workflowLogger.removeHandler(sseLogHandler);
+            pojoActorLogger.removeHandler(sseLogHandler);
+            turingWorkflowLogger.removeHandler(sseLogHandler);
             System.setOut(origOut);
             System.setErr(origErr);
             setOutputListeners(null);
-            workflowLogger.setLevel(prevLevel);
+            workflowLogger.setLevel(prevWorkflowLevel);
+            pojoActorLogger.setLevel(prevPojoActorLevel);
+            turingWorkflowLogger.setLevel(prevTuringWorkflowLevel);
             running.set(false);
         }
     }
@@ -502,8 +516,22 @@ public class WorkflowRunner {
      * Appends arguments to YAML using block scalar (|) for multiline values
      * and double-quoted strings for single-line values.
      */
+    private static final ObjectMapper JSON_VALIDATOR = new ObjectMapper();
+
+    private static boolean isJsonStructure(String s) {
+        if ((s.startsWith("[") && s.endsWith("]")) || (s.startsWith("{") && s.endsWith("}"))) {
+            try {
+                JSON_VALIDATOR.readTree(s);
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        return false;
+    }
+
     private static void appendYamlArguments(StringBuilder sb, String args, String indent) {
-        if (args.startsWith("[") || args.startsWith("{")) {
+        if (isJsonStructure(args)) {
             sb.append(indent).append("arguments: ").append(args).append("\n");
         } else if (args.contains("\n")) {
             // Multiline: use YAML block scalar to preserve newlines
@@ -574,9 +602,9 @@ public class WorkflowRunner {
                     if (action.containsKey("arguments")) {
                         Object rawArgs = action.get("arguments");
                         if (rawArgs instanceof List) {
-                            // Convert List to JSON array string
-                            org.json.JSONArray jsonArr = new org.json.JSONArray((List<?>) rawArgs);
-                            args = jsonArr.toString();
+                            args = new org.json.JSONArray((List<?>) rawArgs).toString();
+                        } else if (rawArgs instanceof java.util.Map) {
+                            args = new org.json.JSONObject((java.util.Map<?, ?>) rawArgs).toString();
                         } else {
                             args = String.valueOf(rawArgs);
                         }

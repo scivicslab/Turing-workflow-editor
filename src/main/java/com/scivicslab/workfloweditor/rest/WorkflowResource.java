@@ -1,19 +1,26 @@
 package com.scivicslab.workfloweditor.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.pojoactor.core.ActorSystem;
+import com.scivicslab.workfloweditor.service.WorkflowQueueActor;
 import com.scivicslab.workfloweditor.service.WorkflowRunner;
 import com.scivicslab.workfloweditor.service.WorkflowState;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
@@ -60,6 +67,24 @@ public class WorkflowResource {
     String paramsBaseDir;
 
     private final java.util.concurrent.CopyOnWriteArrayList<HttpServerResponse> sseConnections = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    private ActorSystem webActorSystem;
+    private ActorRef<WorkflowQueueActor> queueRef;
+
+    @PostConstruct
+    void initQueue() {
+        webActorSystem = new ActorSystem("web");
+        var queueActor = new WorkflowQueueActor(runner, this::emitSse);
+        queueRef = webActorSystem.actorOf("queue", queueActor);
+        queueRef.tell(q -> q.setExecutionContext(queueRef, webActorSystem.getManagedThreadPool())).join();
+    }
+
+    @PreDestroy
+    void destroyQueue() {
+        if (webActorSystem != null) {
+            webActorSystem.terminate();
+        }
+    }
 
     void registerSseRoute(@Observes Router router) {
         router.get("/api/events").handler(this::handleSseConnect);
@@ -108,32 +133,21 @@ public class WorkflowResource {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, String> run(RunRequest request) {
-        if (runner.isRunning()) {
-            return Map.of("status", "error", "message", "Workflow already running");
+        if (request.steps == null) {
+            return Map.of("status", "error", "message", "No workflow steps provided");
         }
 
         int maxIter = request.maxIterations != null && request.maxIterations > 0 ? request.maxIterations : 100;
         Level logLevel = parseLogLevel(request.logLevel);
+        String name = request.name != null ? request.name : "workflow";
 
-        if (request.steps != null) {
-            // Use structured steps (supports delay/breakpoint)
-            final String yaml = WorkflowRunner.applyParameters(
-                WorkflowRunner.toYamlStructured(request.name, null, request.steps),
-                request.parameters);
-            workflowState.replaceAll(request.name, request.steps, maxIter);
-            Thread.startVirtualThread(() -> {
-                try {
-                    runner.runYaml(yaml, maxIter, logLevel, this::emitSse);
-                } catch (Exception e) {
-                    logger.log(Level.WARNING, "Workflow failed", e);
-                    emitSse(new WorkflowEvent("error", e.getMessage(), null, null));
-                }
-            });
-        } else {
-            return Map.of("status", "error", "message", "No workflow steps provided");
-        }
+        final String yaml = WorkflowRunner.applyParameters(
+            WorkflowRunner.toYamlStructured(name, null, request.steps),
+            request.parameters);
+        workflowState.replaceAll(name, request.steps, maxIter);
 
-        return Map.of("status", "started");
+        String id = queueRef.ask(q -> q.enqueue(name, yaml, maxIter, logLevel)).join();
+        return Map.of("status", "queued", "id", id);
     }
 
     /**
@@ -204,38 +218,54 @@ public class WorkflowResource {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, String> runYaml(YamlRunRequest request) {
-        if (runner.isRunning()) {
-            return Map.of("status", "error", "message", "Workflow already running");
-        }
         if (request == null || request.yaml == null || request.yaml.isBlank()) {
             return Map.of("status", "error", "message", "No YAML provided");
         }
         int maxIter = (request.maxIterations != null && request.maxIterations > 0) ? request.maxIterations : 100;
-        String yaml = request.yaml;
-        if (request.parameters != null && !request.parameters.isEmpty()) {
-            yaml = WorkflowRunner.applyParameters(yaml, request.parameters);
-        }
-        final String finalYaml = yaml;
-        Thread.startVirtualThread(() -> {
-            try {
-                runner.runYaml(finalYaml, maxIter, null, this::emitSse);
-            } catch (Exception e) {
-                logger.log(Level.WARNING, "YAML run failed", e);
-                emitSse(new WorkflowEvent("error", e.getMessage(), null, null));
-            }
-        });
-        return Map.of("status", "started");
+        String rawYaml = request.yaml;
+        final String finalYaml = (request.parameters != null && !request.parameters.isEmpty())
+                ? WorkflowRunner.applyParameters(rawYaml, request.parameters)
+                : rawYaml;
+        String name = "yaml-workflow";
+        String id = queueRef.ask(q -> q.enqueue(name, finalYaml, maxIter, null)).join();
+        return Map.of("status", "queued", "id", id);
     }
 
     /**
-     * Stops a running workflow.
+     * Stops the currently running workflow. Does not clear the queue.
      */
     @POST
     @Path("/stop")
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, String> stop() {
-        runner.stop();
+        queueRef.tell(q -> q.cancelCurrent());
         return Map.of("status", "stopped");
+    }
+
+    /**
+     * Returns a snapshot of the pending queue (excludes the currently running item).
+     */
+    @GET
+    @Path("/queue")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> getQueue() {
+        return queueRef.ask(q -> {
+            var result = new LinkedHashMap<String, Object>();
+            result.put("items", q.getQueueSnapshot());
+            result.put("busy", q.isBusy());
+            return result;
+        }).join();
+    }
+
+    /**
+     * Removes a pending item from the queue by id.
+     */
+    @DELETE
+    @Path("/queue/{id}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, String> removeFromQueue(@PathParam("id") String id) {
+        queueRef.tell(q -> q.removeFromQueue(id));
+        return Map.of("status", "removed");
     }
 
     /**
