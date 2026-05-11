@@ -28,6 +28,7 @@ public class WorkflowQueueActor {
 
     private final ArrayDeque<QueueItem> queue = new ArrayDeque<>();
     private boolean busy = false;
+    private QueueItem runningItem = null;
 
     private final WorkflowRunner runner;
     private final Consumer<WorkflowEvent> emitter;
@@ -68,6 +69,7 @@ public class WorkflowQueueActor {
      */
     public void onWorkflowComplete() {
         busy = false;
+        runningItem = null;
         if (!queue.isEmpty()) {
             dispatchNext();
         } else {
@@ -102,11 +104,53 @@ public class WorkflowQueueActor {
         return busy;
     }
 
+    /** Returns full details of a queue item (pending or running) by id, or null if not found. */
+    public Map<String, Object> getItem(String id) {
+        QueueItem found = null;
+        boolean running = false;
+        if (runningItem != null && runningItem.id().equals(id)) {
+            found = runningItem;
+            running = true;
+        } else {
+            for (var item : queue) {
+                if (item.id().equals(id)) { found = item; break; }
+            }
+        }
+        if (found == null) return null;
+        var m = new LinkedHashMap<String, Object>();
+        m.put("id", found.id());
+        m.put("name", found.name());
+        m.put("maxIterations", found.maxIterations());
+        m.put("logLevel", found.logLevel() != null ? found.logLevel().getName() : "INFO");
+        m.put("yaml", found.yaml());
+        m.put("running", running);
+        return m;
+    }
+
+    /** Replaces a pending queue item's fields. No-op if item is running or not found. Returns true on success. */
+    public boolean updateItem(String id, String name, String yaml, int maxIterations, Level logLevel) {
+        for (var iter = queue.iterator(); iter.hasNext(); ) {
+            QueueItem item = iter.next();
+            if (item.id().equals(id)) {
+                var updated = new QueueItem(id, name, yaml, maxIterations, logLevel);
+                // Replace in-place by rebuilding the deque
+                var temp = new ArrayDeque<QueueItem>();
+                for (var q2 : queue) temp.addLast(q2.id().equals(id) ? updated : q2);
+                queue.clear();
+                queue.addAll(temp);
+                emitQueueChanged();
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ---- private -------------------------------------------------------
 
     private void dispatchNext() {
         if (queue.isEmpty()) return;
-        QueueItem item = queue.pollFirst();
+        runningItem = queue.pollFirst();
+        QueueItem item = runningItem;
         busy = true;
         emitQueueChanged();
         pool.execute(() -> {

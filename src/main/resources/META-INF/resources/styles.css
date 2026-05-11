@@ -1525,6 +1525,50 @@ a.actor-action-link:hover {
     color: var(--accent-green, #4caf50);
 }
 
+.queue-item-name {
+    cursor: pointer;
+    flex: 1;
+}
+
+.queue-item-name:hover {
+    color: var(--text-primary);
+    text-decoration: underline;
+}
+
+.queue-item-yaml-editor {
+    width: 100%;
+    min-height: 360px;
+    font-family: var(--font-mono, monospace);
+    font-size: 13px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 8px;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.modal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.modal-close-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.modal-close-btn:hover {
+    color: var(--text-primary);
+}
+
 /* --- Run Parameter Dialog --- */
 .modal-overlay {
     position: fixed;

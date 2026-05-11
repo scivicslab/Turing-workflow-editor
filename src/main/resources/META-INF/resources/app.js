@@ -634,6 +634,7 @@
                 var name = document.createElement('span');
                 name.className = 'queue-item-name';
                 name.textContent = item.name;
+                name.addEventListener('click', function () { openQueueItemModal(item.id); });
                 var btn = document.createElement('button');
                 btn.className = 'queue-item-remove';
                 btn.textContent = '\u00d7';
@@ -648,6 +649,93 @@
         }
         stopBtn.disabled = !busy;
     }
+
+    // --- Queue Item Detail Modal ---
+
+    var queueItemModal = document.getElementById('queueItemModal');
+    var queueItemModalTitle = document.getElementById('queueItemModalTitle');
+    var queueItemYaml = document.getElementById('queueItemYaml');
+    var queueItemUpdate = document.getElementById('queueItemUpdate');
+    var queueItemModalClose = document.getElementById('queueItemModalClose');
+    var queueItemClose = document.getElementById('queueItemClose');
+    var currentQueueItemId = null;
+
+    function buildCompositeYaml(item) {
+        var lines = [];
+        lines.push('name: ' + item.name);
+        lines.push('maxIterations: ' + item.maxIterations);
+        lines.push('logLevel: ' + (item.logLevel || 'INFO'));
+        lines.push('workflow: |');
+        (item.yaml || '').split('\n').forEach(function (l) { lines.push('  ' + l); });
+        return lines.join('\n');
+    }
+
+    function parseCompositeYaml(text) {
+        var result = { name: '', maxIterations: 10, logLevel: 'INFO', yaml: '' };
+        var lines = text.split('\n');
+        var inWorkflow = false;
+        var workflowLines = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (inWorkflow) {
+                if (line === '' || line.startsWith('  ')) {
+                    workflowLines.push(line.startsWith('  ') ? line.slice(2) : '');
+                } else {
+                    inWorkflow = false;
+                }
+            }
+            if (!inWorkflow) {
+                var m;
+                if ((m = line.match(/^name:\s*(.+)/)))          result.name = m[1].trim();
+                else if ((m = line.match(/^maxIterations:\s*(\d+)/))) result.maxIterations = parseInt(m[1]);
+                else if ((m = line.match(/^logLevel:\s*(\S+)/)))  result.logLevel = m[1].trim();
+                else if (/^workflow:\s*\|/.test(line))            inWorkflow = true;
+            }
+        }
+        result.yaml = workflowLines.join('\n').replace(/\s+$/, '');
+        return result;
+    }
+
+    function openQueueItemModal(id) {
+        fetch('/api/queue/' + id)
+            .then(function (r) { return r.json(); })
+            .then(function (item) {
+                currentQueueItemId = id;
+                queueItemModalTitle.textContent = 'Queue Item — ' + item.name;
+                queueItemYaml.value = buildCompositeYaml(item);
+                queueItemYaml.readOnly = !!item.running;
+                queueItemUpdate.style.display = item.running ? 'none' : '';
+                queueItemModal.style.display = 'flex';
+                queueItemYaml.focus();
+            })
+            .catch(function (e) { addLog('Failed to load queue item: ' + e, 'error'); });
+    }
+
+    function closeQueueItemModal() {
+        queueItemModal.style.display = 'none';
+        currentQueueItemId = null;
+    }
+
+    queueItemModalClose.addEventListener('click', closeQueueItemModal);
+    queueItemClose.addEventListener('click', closeQueueItemModal);
+    queueItemModal.addEventListener('click', function (e) {
+        if (e.target === queueItemModal) closeQueueItemModal();
+    });
+
+    queueItemUpdate.addEventListener('click', function () {
+        if (!currentQueueItemId) return;
+        var parsed = parseCompositeYaml(queueItemYaml.value);
+        fetch('/api/queue/' + currentQueueItemId, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(parsed)
+        })
+            .then(function (r) {
+                if (r.ok) { closeQueueItemModal(); addLog('Queue item updated', 'step'); }
+                else { r.json().then(function (d) { addLog('Update failed: ' + (d.error || r.status), 'error'); }); }
+            })
+            .catch(function (e) { addLog('Update error: ' + e, 'error'); });
+    });
 
     // --- Step Highlighting ---
 

@@ -19,10 +19,12 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 
 import com.scivicslab.workfloweditor.service.WorkflowRunner.StepDto;
 import io.quarkus.runtime.annotations.RegisterForReflection;
@@ -266,6 +268,37 @@ public class WorkflowResource {
     public Map<String, String> removeFromQueue(@PathParam("id") String id) {
         queueRef.tell(q -> q.removeFromQueue(id));
         return Map.of("status", "removed");
+    }
+
+    /**
+     * Returns full details of a queue item (pending or running) by id.
+     */
+    @GET
+    @Path("/queue/{id}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getQueueItem(@PathParam("id") String id) {
+        var item = queueRef.ask(q -> q.getItem(id)).join();
+        if (item == null) return Response.status(404).entity(Map.of("error", "not found")).build();
+        return Response.ok(item).build();
+    }
+
+    public record QueueItemUpdateRequest(String name, String yaml, int maxIterations, String logLevel) {}
+
+    /**
+     * Updates a pending queue item's content. Returns 409 if the item is currently running.
+     */
+    @PUT
+    @Path("/queue/{id}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response updateQueueItem(@PathParam("id") String id, QueueItemUpdateRequest req) {
+        Level level;
+        try { level = Level.parse(req.logLevel() != null ? req.logLevel() : "INFO"); }
+        catch (IllegalArgumentException e) { level = Level.INFO; }
+        final Level logLevel = level;
+        boolean updated = queueRef.ask(q -> q.updateItem(id, req.name(), req.yaml(), req.maxIterations(), logLevel)).join();
+        if (!updated) return Response.status(409).entity(Map.of("error", "item is running or not found")).build();
+        return Response.ok(Map.of("status", "updated")).build();
     }
 
     /**
