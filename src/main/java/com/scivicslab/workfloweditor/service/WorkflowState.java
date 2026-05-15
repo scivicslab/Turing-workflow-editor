@@ -20,6 +20,8 @@ public class WorkflowState {
 
     private final Map<String, TabData> tabs = new LinkedHashMap<>();
     private volatile String activeTab = null;
+    private final List<String> catalogDirs = new ArrayList<>(
+            List.of(System.getProperty("user.dir") + "/workflow"));
 
     public static class TabData {
         public final String name;
@@ -32,6 +34,17 @@ public class WorkflowState {
         public TabData(String name) {
             this.name = name;
         }
+    }
+
+    // --- Catalog directories ---
+
+    public synchronized List<String> getCatalogDirs() {
+        return new ArrayList<>(catalogDirs);
+    }
+
+    public synchronized void setCatalogDirs(List<String> dirs) {
+        catalogDirs.clear();
+        if (dirs != null) catalogDirs.addAll(dirs);
     }
 
     // --- Tab management ---

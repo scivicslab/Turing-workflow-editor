@@ -2,6 +2,7 @@ package com.scivicslab.workfloweditor.rest;
 
 import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.workfloweditor.rest.WorkflowResource.WorkflowEvent;
+import com.scivicslab.workfloweditor.service.CatalogScanner;
 import com.scivicslab.workfloweditor.service.WorkflowRunner;
 import com.scivicslab.workfloweditor.service.WorkflowRunner.ActionDto;
 import com.scivicslab.workfloweditor.service.WorkflowRunner.StepDto;
@@ -35,6 +36,9 @@ public class WorkflowApiResource {
 
     @Inject
     WorkflowResource workflowResource;
+
+    @Inject
+    com.scivicslab.workfloweditor.service.CatalogIndexService catalogIndex;
 
     // --- Workflow CRUD ---
 
@@ -415,70 +419,198 @@ public class WorkflowApiResource {
     @Path("/workflows/available")
     @Produces(MediaType.APPLICATION_JSON)
     public List<Map<String, String>> availableWorkflows() {
-        List<Map<String, String>> workflows = new ArrayList<>();
-        var worksDir = java.nio.file.Path.of(System.getProperty("user.home"), "works");
-        if (!java.nio.file.Files.isDirectory(worksDir)) return workflows;
-
-        // Scan ~/works/*/src/main/resources/{workflows,code}/*.yaml
-        try (var projects = java.nio.file.Files.newDirectoryStream(worksDir, java.nio.file.Files::isDirectory)) {
-            for (var project : projects) {
-                String projectName = project.getFileName().toString();
-                scanWorkflowDir(project.resolve("src/main/resources/workflows"), projectName, workflows);
-                scanWorkflowDir(project.resolve("src/main/resources/code"), projectName, workflows);
-            }
-        } catch (IOException e) {
-            logger.warning("Failed to scan workflows: " + e.getMessage());
-        }
-
-        // Also scan ~/works/testcluster-iac/*.yaml (direct YAML files)
-        var testclusterDir = worksDir.resolve("testcluster-iac");
-        if (java.nio.file.Files.isDirectory(testclusterDir)) {
-            try (var yamls = java.nio.file.Files.newDirectoryStream(testclusterDir, "*.yaml")) {
-                for (var yaml : yamls) {
-                    addWorkflowEntry(yaml, "testcluster-iac", workflows);
-                }
-            } catch (IOException e) {
-                // ignore
-            }
-        }
-
-        return workflows;
+        var dirs = state.getCatalogDirs().stream()
+                .map(java.nio.file.Path::of).toList();
+        return CatalogScanner.scan(dirs);
     }
 
-    private void scanWorkflowDir(java.nio.file.Path dir, String projectName, List<Map<String, String>> workflows) {
-        if (!java.nio.file.Files.isDirectory(dir)) return;
-        try (var yamls = java.nio.file.Files.newDirectoryStream(dir, "*.yaml")) {
-            for (var yaml : yamls) {
-                addWorkflowEntry(yaml, projectName, workflows);
-            }
-        } catch (IOException e) {
-            // ignore
-        }
+    @GET
+    @Path("/catalog")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<Map<String, String>> catalog() {
+        var dirs = state.getCatalogDirs().stream()
+                .map(java.nio.file.Path::of).toList();
+        return CatalogScanner.scan(dirs);
     }
 
-    private void addWorkflowEntry(java.nio.file.Path yaml, String projectName, List<Map<String, String>> workflows) {
+    @POST
+    @Path("/catalog/scan")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<Map<String, String>> scanPaths(List<String> paths) {
+        if (paths == null) return List.of();
+        var cwd = java.nio.file.Path.of(System.getProperty("user.dir"));
+        var dirs = paths.stream().map(p -> {
+            var path = java.nio.file.Path.of(p);
+            return path.isAbsolute() ? path : cwd.resolve(path);
+        }).toList();
+        return CatalogScanner.scan(dirs);
+    }
+
+    @GET
+    @Path("/catalog/file")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response getCatalogFile(@QueryParam("path") String path) {
+        if (path == null || path.isBlank()) return Response.status(400).entity("path required").build();
         try {
-            String content = java.nio.file.Files.readString(yaml);
-            // Quick check: valid workflow YAML should contain "steps:" or "states:"
-            if (!content.contains("steps:") && !content.contains("states:")) return;
-
-            // Extract name from YAML
-            String name = yaml.getFileName().toString().replace(".yaml", "");
-            for (String line : content.lines().toList()) {
-                if (line.startsWith("name:")) {
-                    name = line.substring(5).trim().replace("\"", "").replace("'", "");
-                    break;
-                }
+            var file = java.nio.file.Path.of(path);
+            if (!file.isAbsolute()) {
+                file = java.nio.file.Path.of(System.getProperty("user.dir")).resolve(file);
             }
-
-            Map<String, String> entry = new LinkedHashMap<>();
-            entry.put("name", name);
-            entry.put("file", yaml.getFileName().toString());
-            entry.put("project", projectName);
-            entry.put("path", yaml.toAbsolutePath().toString());
-            workflows.add(entry);
+            String content = java.nio.file.Files.readString(file);
+            return Response.ok(content).build();
         } catch (IOException e) {
-            // skip unreadable files
+            return Response.status(404).entity("File not found: " + path).build();
+        }
+    }
+
+    @GET
+    @Path("/catalog/dirs")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<String> getCatalogDirs() {
+        return state.getCatalogDirs();
+    }
+
+    @GET
+    @Path("/catalog/cwd")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, String> getCatalogCwd() {
+        return Map.of("cwd", System.getProperty("user.dir"));
+    }
+
+    @PUT
+    @Path("/catalog/dirs")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> setCatalogDirs(List<String> dirs) {
+        if (dirs == null) {
+            return Map.of("status", "error", "message", "dirs must be a JSON array of strings");
+        }
+        state.setCatalogDirs(dirs);
+        return Map.of("status", "ok", "dirs", state.getCatalogDirs());
+    }
+
+    // --- Catalog Lucene index ---
+
+    public static class CatalogEntryDto {
+        public String filename;
+        public String path;
+        public String name;
+        public String description;
+        public String content; // raw YAML (optional — for client-side scanned files)
+    }
+
+    @POST
+    @Path("/catalog/index")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> buildCatalogIndex(List<CatalogEntryDto> entries) {
+        if (entries == null) entries = List.of();
+        try {
+            var list = entries.stream()
+                    .map(e -> {
+                        // If raw content provided, parse with SnakeYAML for correct name/description
+                        if (e.content != null && !e.content.isBlank()) {
+                            var parsed = CatalogScanner.parseContent(
+                                    e.content,
+                                    e.filename != null ? e.filename : "",
+                                    "",
+                                    e.path != null ? e.path : "");
+                            if (parsed != null) {
+                                return new com.scivicslab.workfloweditor.service.CatalogIndexService.Entry(
+                                        parsed.get("file"), parsed.get("path"),
+                                        parsed.get("name"), parsed.get("description"));
+                            }
+                            return null; // not a workflow YAML
+                        }
+                        return new com.scivicslab.workfloweditor.service.CatalogIndexService.Entry(
+                                e.filename != null ? e.filename : "",
+                                e.path != null ? e.path : "",
+                                e.name != null ? e.name : "",
+                                e.description != null ? e.description : "");
+                    })
+                    .filter(e -> e != null)
+                    .toList();
+            catalogIndex.rebuild(list);
+            return Map.of("status", "ok", "indexed", list.size());
+        } catch (Exception e) {
+            return Map.of("status", "error", "message", e.getMessage());
+        }
+    }
+
+    @GET
+    @Path("/catalog/search")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response searchCatalog(@QueryParam("q") String q,
+                                  @QueryParam("page") @jakarta.ws.rs.DefaultValue("0") int page,
+                                  @QueryParam("size") @jakarta.ws.rs.DefaultValue("10") int size) {
+        try {
+            var result = catalogIndex.search(q, page, size);
+            return Response.ok(result).build();
+        } catch (Exception e) {
+            return Response.status(500).entity(Map.of("status", "error", "message", e.getMessage())).build();
+        }
+    }
+
+    // --- Filesystem browser (server-side directory listing) ---
+
+    @GET
+    @Path("/fs/list")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> fsList(@QueryParam("path") String path) {
+        java.nio.file.Path dir;
+        if (path == null || path.isBlank()) {
+            dir = java.nio.file.Path.of(System.getProperty("user.dir"));
+        } else {
+            dir = java.nio.file.Path.of(path);
+        }
+        if (!java.nio.file.Files.isDirectory(dir)) {
+            return Map.of("status", "error", "message", "Not a directory: " + dir);
+        }
+        List<String> subdirs = new ArrayList<>();
+        try (var stream = java.nio.file.Files.newDirectoryStream(dir,
+                p -> java.nio.file.Files.isDirectory(p) && !p.getFileName().toString().startsWith("."))) {
+            List<java.nio.file.Path> sorted = new ArrayList<>();
+            stream.forEach(sorted::add);
+            sorted.sort(java.util.Comparator.comparing(p -> p.getFileName().toString().toLowerCase()));
+            for (var sub : sorted) subdirs.add(sub.getFileName().toString());
+        } catch (IOException e) {
+            return Map.of("status", "error", "message", e.getMessage());
+        }
+        String parent = dir.getParent() != null ? dir.getParent().toString() : "";
+        return Map.of("status", "ok", "path", dir.toString(), "parent", parent, "dirs", subdirs);
+    }
+
+    @GET
+    @Path("/fs/find")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> fsFind(@QueryParam("name") String name) {
+        if (name == null || name.isBlank())
+            return Map.of("status", "error", "message", "name required");
+        var cwd = java.nio.file.Path.of(System.getProperty("user.dir"));
+        var matches = new java.util.ArrayList<String>();
+        try (var stream = java.nio.file.Files.walk(cwd, 6)) {
+            stream.filter(p -> java.nio.file.Files.isDirectory(p)
+                            && p.getFileName().toString().equals(name))
+                  .forEach(p -> matches.add(cwd.relativize(p).toString()));
+        } catch (IOException e) {
+            return Map.of("status", "error", "message", e.getMessage());
+        }
+        return Map.of("status", "ok", "matches", matches);
+    }
+
+    @GET
+    @Path("/workflows/content")
+    @Produces("text/plain")
+    public jakarta.ws.rs.core.Response workflowContent(@QueryParam("path") String path) {
+        if (path == null || path.isBlank()) {
+            return jakarta.ws.rs.core.Response.status(400).entity("path is required").build();
+        }
+        try {
+            String yaml = java.nio.file.Files.readString(java.nio.file.Path.of(path));
+            return jakarta.ws.rs.core.Response.ok(yaml).build();
+        } catch (IOException e) {
+            return jakarta.ws.rs.core.Response.status(404).entity("Not found: " + e.getMessage()).build();
         }
     }
 

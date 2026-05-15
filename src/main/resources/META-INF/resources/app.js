@@ -1086,6 +1086,386 @@
 
     var editYamlOverlay = document.getElementById('editYamlOverlay');
 
+    // --- Catalog modal ---
+
+    var catalogOverlay   = document.getElementById('catalogOverlay');
+    var catalogCloseBtn  = document.getElementById('catalogCloseBtn');
+    var catalogSearch    = document.getElementById('catalogSearch');
+    var catalogDirList   = document.getElementById('catalogDirList');
+    var catalogTableBody = document.getElementById('catalogTableBody');
+    var catalogTable     = document.getElementById('catalogTable');
+    var catalogMsg       = document.getElementById('catalogMsg');
+    var catalogPager     = document.getElementById('catalogPager');
+
+    // Each entry: {name: string, handle: FileSystemDirectoryHandle|null}
+    var catalogDirs = [];
+    var catalogCwd = '';
+    var catalogCurrentPage = 0;
+    var catalogPageSize = 10;
+    var catalogCurrentQuery = '';
+
+    document.getElementById('openCatalogBtn').addEventListener('click', function () {
+        document.getElementById('fileMenu').style.display = 'none';
+        openCatalog();
+    });
+
+    catalogCloseBtn.addEventListener('click', function () {
+        catalogOverlay.style.display = 'none';
+    });
+    catalogOverlay.addEventListener('mousedown', function (e) {
+        catalogOverlay._pendingClose = (e.target === catalogOverlay);
+    });
+    catalogOverlay.addEventListener('mouseup', function (e) {
+        if (catalogOverlay._pendingClose && e.target === catalogOverlay) {
+            catalogOverlay.style.display = 'none';
+        }
+        catalogOverlay._pendingClose = false;
+    });
+
+    var catalogDirPicker   = document.getElementById('catalogDirPicker');
+    var catalogPickerPath  = document.getElementById('catalogPickerPath');
+    var catalogPickerList  = document.getElementById('catalogPickerList');
+    var catalogPickerReplace = false;
+
+    function openDirPicker(replace) {
+        catalogPickerReplace = replace;
+        catalogDirPicker.style.display = 'block';
+        loadPickerPath('');
+    }
+
+    function loadPickerPath(path) {
+        var url = '/api/fs/list' + (path ? '?path=' + encodeURIComponent(path) : '');
+        fetch(url).then(function (r) { return r.json(); }).then(function (data) {
+            if (data.status === 'error') return;
+            catalogPickerPath.textContent = data.path;
+            catalogPickerPath.title = data.path;
+            catalogPickerList.innerHTML = '';
+            if ((data.dirs || []).length === 0) {
+                var empty = document.createElement('div');
+                empty.style.cssText = 'padding:12px 16px;color:#888;font-size:0.85em;';
+                empty.textContent = '(サブディレクトリなし)';
+                catalogPickerList.appendChild(empty);
+                return;
+            }
+            data.dirs.forEach(function (dir) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;border-bottom:1px solid var(--border-color);';
+                row.innerHTML = '<span style="color:#e8a000;">📁</span>'
+                    + '<span style="font-family:monospace;font-size:0.88em;flex:1;">' + dir + '</span>'
+                    + '<span style="color:#aaa;font-size:0.8em;">▶</span>';
+                row.addEventListener('mouseenter', function () { row.style.background = 'var(--bg-tertiary,#e8e8e8)'; });
+                row.addEventListener('mouseleave', function () { row.style.background = ''; });
+                row.addEventListener('click', function () {
+                    loadPickerPath(data.path + '/' + dir);
+                });
+                catalogPickerList.appendChild(row);
+            });
+        });
+    }
+
+    document.getElementById('catalogPickerUp').addEventListener('click', function () {
+        var cur = catalogPickerPath.textContent;
+        var up = cur.replace(/\/[^/]+$/, '');
+        if (up) loadPickerPath(up);
+    });
+
+    document.getElementById('catalogPickerSelect').addEventListener('click', function () {
+        var abs = catalogPickerPath.textContent;
+        if (!abs) return;
+        if (catalogPickerReplace) catalogDirs = [];
+        catalogDirs.push({name: abs, handle: null});
+        catalogDirPicker.style.display = 'none';
+        renderCatalogDirs();
+        scanAndIndex();
+    });
+
+    document.getElementById('catalogPickerCancel').addEventListener('click', function () {
+        catalogDirPicker.style.display = 'none';
+    });
+
+    document.getElementById('catalogSetDirBtn').addEventListener('click', function () {
+        openDirPicker(true);
+    });
+    document.getElementById('catalogAddDirBtn').addEventListener('click', function () {
+        openDirPicker(false);
+    });
+
+    document.getElementById('catalogSearchBtn').addEventListener('click', function () {
+        catalogCurrentQuery = catalogSearch.value.trim();
+        catalogCurrentPage = 0;
+        loadCatalogPage();
+    });
+
+    document.getElementById('catalogSearchClear').addEventListener('click', function () {
+        catalogSearch.value = '';
+        catalogCurrentQuery = '';
+        catalogCurrentPage = 0;
+        loadCatalogPage();
+    });
+
+    catalogSearch.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            catalogCurrentQuery = catalogSearch.value.trim();
+            catalogCurrentPage = 0;
+            loadCatalogPage();
+        }
+    });
+
+    function pickDirectory(callback) {
+        window.showDirectoryPicker()
+            .then(function (handle) {
+                callback({name: handle.name, handle: handle});
+            })
+            .catch(function () { /* cancelled */ });
+    }
+
+    function renderCatalogDirs() {
+        catalogDirList.innerHTML = '';
+        catalogDirs.forEach(function (entry, idx) {
+            var chip = document.createElement('div');
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--bg-tertiary,#e8e8e8);border-radius:3px;padding:2px 8px;font-size:0.82em;font-family:monospace;';
+            var label = document.createElement('span');
+            label.textContent = toRelPath(entry.name);
+            chip.title = entry.name;
+            chip.appendChild(label);
+            var removeBtn = document.createElement('button');
+            removeBtn.style.cssText = 'border:none;background:none;cursor:pointer;padding:0 2px;color:#888;';
+            removeBtn.textContent = '×';
+            removeBtn.addEventListener('click', (function (i) {
+                return function () {
+                    catalogDirs.splice(i, 1);
+                    renderCatalogDirs();
+                    scanAndIndex();
+                };
+            })(idx));
+            chip.appendChild(removeBtn);
+            catalogDirList.appendChild(chip);
+        });
+    }
+
+    // Recursively collect *.yaml files from a FileSystemDirectoryHandle
+    async function collectYamlFiles(handle, prefix) {
+        var results = [];
+        for await (var [name, entry] of handle.entries()) {
+            if (entry.kind === 'directory') {
+                var sub = await collectYamlFiles(entry, prefix + name + '/');
+                results = results.concat(sub);
+            } else if (name.endsWith('.yaml') || name.endsWith('.yml')) {
+                results.push({file: await entry.getFile(), path: prefix + name});
+            }
+        }
+        return results;
+    }
+
+    function scanAndIndex() {
+        if (catalogDirs.length === 0) {
+            catalogTable.style.display = 'none';
+            catalogMsg.textContent = '';
+            catalogPager.innerHTML = '';
+            return;
+        }
+        catalogMsg.textContent = 'Scanning...';
+        catalogTable.style.display = 'none';
+        catalogPager.innerHTML = '';
+
+        // Dirs with handle → client-side scan; dirs without handle → server-side scan
+        var clientDirs = catalogDirs.filter(function (d) { return d.handle; });
+        var serverDirs = catalogDirs.filter(function (d) { return !d.handle; });
+
+        var serverPromise = serverDirs.length > 0
+            ? fetch('/api/catalog/scan', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(serverDirs.map(function (d) { return d.name; }))
+              }).then(function (r) { return r.json(); })
+                .then(function (entries) {
+                    return entries.map(function (e) {
+                        return {filename: e.file || e.filename || '', path: e.path || '', name: e.name || '', description: e.description || ''};
+                    });
+                })
+            : Promise.resolve([]);
+
+        var clientPromise = clientDirs.length > 0
+            ? Promise.all(clientDirs.map(function (d) {
+                return collectYamlFiles(d.handle, d.name + '/');
+              })).then(function (groups) {
+                var allFiles = [].concat.apply([], groups);
+                return Promise.all(allFiles.map(function (f) {
+                    return f.file.text().then(function (content) {
+                        // Send raw content to server for SnakeYAML parsing
+                        return {filename: f.file.name, path: f.path, content: content};
+                    });
+                }));
+              })
+            : Promise.resolve([]);
+
+        Promise.all([serverPromise, clientPromise])
+            .then(function (results) {
+                var all = results[0].concat(results[1]);
+                return fetch('/api/catalog/index', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(all)
+                });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (result) {
+                if (result.status === 'ok') {
+                    catalogCurrentPage = 0;
+                    catalogCurrentQuery = '';
+                    catalogSearch.value = '';
+                    loadCatalogPage();
+                } else {
+                    catalogMsg.textContent = 'Indexing error: ' + result.message;
+                }
+            })
+            .catch(function (err) {
+                catalogMsg.textContent = 'Scan error: ' + err.message;
+            });
+    }
+
+    function loadCatalogPage() {
+        var url = '/api/catalog/search?page=' + catalogCurrentPage + '&size=' + catalogPageSize;
+        if (catalogCurrentQuery) url += '&q=' + encodeURIComponent(catalogCurrentQuery);
+        fetch(url).then(function (r) { return r.json(); }).then(function (result) {
+            renderCatalogTable(result);
+        });
+    }
+
+    function renderCatalogTable(result) {
+        var rows = result.results || [];
+        var total = result.total || 0;
+
+        if (total === 0) {
+            catalogTable.style.display = 'none';
+            catalogMsg.textContent = catalogCurrentQuery ? 'No results for "' + catalogCurrentQuery + '".' : 'No workflows found.';
+            catalogPager.innerHTML = '';
+            return;
+        }
+
+        catalogMsg.textContent = '';
+        catalogTable.style.display = 'table';
+        catalogTableBody.innerHTML = '';
+
+        rows.forEach(function (entry) {
+            var tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid var(--border-color)';
+
+            var tdWorkflow = document.createElement('td');
+            tdWorkflow.style.cssText = 'padding:6px 8px;';
+            var nameDiv = document.createElement('div');
+            nameDiv.style.cssText = 'font-weight:500;';
+            nameDiv.textContent = entry.name;
+            var fileDiv = document.createElement('div');
+            fileDiv.style.cssText = 'font-size:0.8em;color:#888;font-family:monospace;margin-top:2px;word-break:break-all;';
+            var relFile = toRelPath(entry.path || entry.filename);
+            fileDiv.textContent = relFile;
+            fileDiv.title = entry.path || entry.filename;
+            var btn = document.createElement('button');
+            btn.className = 'btn btn-small catalog-import-btn';
+            btn.textContent = 'Import';
+            btn.style.marginTop = '4px';
+            btn.addEventListener('click', (function (e) {
+                return function () { importFromCatalogEntry(e); };
+            })(entry));
+            tdWorkflow.appendChild(nameDiv);
+            tdWorkflow.appendChild(fileDiv);
+            tdWorkflow.appendChild(btn);
+            tr.appendChild(tdWorkflow);
+
+            var tdDesc = document.createElement('td');
+            tdDesc.style.cssText = 'padding:6px 8px;white-space:pre-wrap;';
+            tdDesc.textContent = entry.description;
+            tr.appendChild(tdDesc);
+
+            catalogTableBody.appendChild(tr);
+        });
+
+        // Pager
+        var totalPages = Math.ceil(total / catalogPageSize);
+        catalogPager.innerHTML = '';
+        var info = document.createElement('span');
+        info.textContent = (catalogCurrentPage * catalogPageSize + 1) + '–' +
+                Math.min((catalogCurrentPage + 1) * catalogPageSize, total) + ' / ' + total;
+        catalogPager.appendChild(info);
+
+        if (catalogCurrentPage > 0) {
+            var prev = document.createElement('button');
+            prev.className = 'btn btn-small';
+            prev.textContent = '← Prev';
+            prev.addEventListener('click', function () {
+                catalogCurrentPage--;
+                loadCatalogPage();
+            });
+            catalogPager.appendChild(prev);
+        }
+        if (catalogCurrentPage < totalPages - 1) {
+            var next = document.createElement('button');
+            next.className = 'btn btn-small';
+            next.textContent = 'Next →';
+            next.addEventListener('click', function () {
+                catalogCurrentPage++;
+                loadCatalogPage();
+            });
+            catalogPager.appendChild(next);
+        }
+    }
+
+    function importFromCatalogEntry(entry) {
+        var targetPath = entry.path;
+        if (!targetPath) { appendLog('error', 'No path for catalog entry'); return; }
+
+        fetch('/api/catalog/file?path=' + encodeURIComponent(targetPath))
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.text();
+            })
+            .then(function (yaml) {
+                parseAndLoadYaml(yaml);
+                appendLog('info', 'Imported from catalog: ' + entry.name);
+                catalogOverlay.style.display = 'none';
+            })
+            .catch(function (err) {
+                appendLog('error', 'Catalog import failed: ' + err.message);
+            });
+    }
+
+    function toRelPath(p) {
+        if (catalogCwd && p && p.startsWith(catalogCwd + '/')) {
+            return p.slice(catalogCwd.length + 1);
+        }
+        return p || '';
+    }
+
+    function openCatalog() {
+        catalogOverlay.style.display = 'flex';
+        catalogSearch.value = '';
+        catalogCurrentQuery = '';
+        requestAnimationFrame(function () {
+            document.getElementById('catalogDirInput').focus();
+        });
+        fetch('/api/catalog/cwd')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                catalogCwd = data.cwd || '';
+                document.getElementById('catalogCwdDisplay').textContent = 'cwd: ' + catalogCwd;
+                if (catalogDirs.length === 0) {
+                    return fetch('/api/catalog/dirs')
+                        .then(function (r) { return r.json(); })
+                        .then(function (dirs) {
+                            dirs.forEach(function (d) { catalogDirs.push({name: d, handle: null}); });
+                            renderCatalogDirs();
+                            scanAndIndex();
+                        });
+                } else {
+                    renderCatalogDirs();
+                    scanAndIndex();
+                }
+            });
+    }
+
+    // --- Edit YAML modal ---
+
     document.getElementById('editYamlBtn').addEventListener('click', function () {
         saveCurrentTabToServer(function () {
             fetch('/api/yaml/export')
@@ -1232,8 +1612,8 @@
         input.click();
     }
 
-    importYamlBtn.addEventListener('click', doImportYaml);
-    importYamlHeaderBtn.addEventListener('click', doImportYaml);
+    importYamlBtn.addEventListener('click', openCatalog);
+    importYamlHeaderBtn.addEventListener('click', openCatalog);
 
     newWorkflowBtn.addEventListener('click', function () {
         var name = prompt('Workflow name:', 'new-workflow');
