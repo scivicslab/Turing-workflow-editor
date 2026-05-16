@@ -325,43 +325,37 @@ header h1 {
     opacity: 0.85;
 }
 
-.btn-batch {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border-color: var(--border-color);
+.catalog-tag-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--bg-tertiary, #e0e0e0);
+    color: var(--text-secondary);
+    font-size: 0.72em;
+    cursor: pointer;
+    white-space: nowrap;
 }
 
-.btn-batch:hover {
+.catalog-tag-chip:hover {
     background: var(--accent-blue);
     color: var(--bg-primary);
-    border-color: var(--accent-blue);
 }
 
-.batch-job-result {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    background: var(--bg-secondary);
+.cli-tooltip-box {
+    position: fixed;
+    z-index: 9999;
+    background: var(--bg-primary);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    margin: 4px 8px;
-    font-size: 12px;
-}
-
-.batch-job-label {
-    color: var(--text-secondary);
-    white-space: nowrap;
-}
-
-.batch-job-id {
+    border-radius: 6px;
+    padding: 10px 14px;
     font-family: 'Cascadia Code', 'Fira Code', monospace;
     font-size: 11px;
-    color: var(--accent-blue);
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: pre;
+    color: var(--text-primary);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+    max-width: 680px;
+    pointer-events: none;
+    line-height: 1.6;
 }
 
 .step-delay {
@@ -442,36 +436,44 @@ main {
 
 .actor-tree-header {
     display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 6px 10px;
-    background: var(--bg-tertiary);
-    border-bottom: 1px solid var(--border-color);
+    align-items: stretch;
+    background: var(--bg-secondary);
+    border-bottom: 2px solid var(--border-color);
     font-size: 12px;
     font-weight: 600;
-    color: var(--text-secondary);
-}
-
-.actor-tree-header span:first-child {
-    flex: 1;
 }
 
 .side-tab {
     cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 3px;
+    padding: 8px 14px;
     color: var(--text-secondary);
     font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    white-space: nowrap;
+    transition: color 0.15s;
 }
 
 .side-tab:hover {
     color: var(--text-primary);
-    background: var(--bg-primary);
+    background: var(--bg-tertiary);
 }
 
 .side-tab.active {
     color: var(--accent-blue);
-    background: var(--bg-primary);
+    border-bottom-color: var(--accent-blue);
+    background: transparent;
+}
+
+.side-tab-spacer {
+    flex: 1;
+}
+
+.side-tab-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
 }
 
 .side-panel-view {

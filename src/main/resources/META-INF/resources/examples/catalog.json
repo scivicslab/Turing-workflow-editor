@@ -1,0 +1,8 @@
+[
+  {
+    "name": "llm-hello",
+    "description": "Load LLM plugin JAR via Maven, send a prompt to Claude via MCP Gateway.",
+    "file": "llm-hello.yaml",
+    "tags": ["llm", "mcp", "starter"]
+  }
+]

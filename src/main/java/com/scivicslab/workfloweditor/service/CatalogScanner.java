@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class CatalogScanner {
 
@@ -55,9 +56,18 @@ public class CatalogScanner {
             String description = "";
             if (map.get("description") instanceof String s) description = s;
 
+            String tags = "";
+            Object tagsObj = map.get("tags");
+            if (tagsObj instanceof List<?> list) {
+                tags = list.stream().map(Object::toString).collect(Collectors.joining(" "));
+            } else if (tagsObj instanceof String s) {
+                tags = s;
+            }
+
             Map<String, String> entry = new LinkedHashMap<>();
             entry.put("name", name);
             entry.put("description", description);
+            entry.put("tags", tags);
             entry.put("file", filename);
             entry.put("source", sourceName);
             entry.put("path", path);

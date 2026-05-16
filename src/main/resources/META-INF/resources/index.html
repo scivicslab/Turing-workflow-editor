@@ -16,7 +16,6 @@
                 <div id="fileMenu" class="header-menu" style="display:none;">
                     <button id="newWorkflowBtn" class="header-menu-item">New</button>
                     <button id="importYamlBtn" class="header-menu-item">Import YAML</button>
-                    <button id="openCatalogBtn" class="header-menu-item">From Catalog...</button>
                     <hr class="header-menu-divider">
                     <button id="editYamlBtn" class="header-menu-item">Edit YAML</button>
                     <hr class="header-menu-divider">
@@ -24,16 +23,7 @@
                     <button id="exportYamlBtn" class="header-menu-item">Save As</button>
                 </div>
             </div>
-            <div class="header-menu-wrap">
-                <button id="sidebarMenuBtn" class="btn btn-small">Sidebar &#9660;</button>
-                <div id="sidebarMenu" class="header-menu" style="display:none;">
-                    <button id="treeBtn" class="header-menu-item">Actor Tree</button>
-                    <button id="pluginsBtn" class="header-menu-item">Plugins</button>
-                    <button id="workflowsBtn" class="header-menu-item">Run Panel</button>
-                </div>
-            </div>
             <button id="importYamlHeaderBtn" class="btn btn-small">Import YAML</button>
-            <button id="runBtn" class="btn btn-run">Run</button>
             <label for="maxIterations" style="color:var(--text-secondary);font-size:12px;white-space:nowrap;">Max iter:</label>
             <input type="number" id="maxIterations" value="100" min="1" max="999999999" style="width:80px;">
             <label style="color:var(--text-secondary);font-size:12px;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="infiniteCheck"> ∞</label>
@@ -55,15 +45,19 @@
         </div>
     </header>
     <main>
-        <section id="sidePanel" class="actor-tree-panel" style="display:none;">
+        <section id="sidePanel" class="actor-tree-panel" style="display:flex;">
             <div class="actor-tree-header">
                 <span class="side-tab" data-tab="actors">Actors</span>
                 <span class="side-tab" data-tab="plugins">Plugins</span>
-                <span class="side-tab" data-tab="run">Run</span>
-                <button id="sidePanelRefresh" class="btn btn-small" title="Refresh">&#8635;</button>
-                <button id="sidePanelClose" class="btn btn-small">&times;</button>
+                <span class="side-tab active" data-tab="run">Run</span>
+                <span class="side-tab" data-tab="queue">Queue</span>
+                <span class="side-tab-spacer"></span>
+                <div class="side-tab-actions">
+                    <button id="sidePanelRefresh" class="btn btn-small" title="Refresh">&#8635;</button>
+                    <button id="sidePanelClose" class="btn btn-small">&times;</button>
+                </div>
             </div>
-            <div id="sidePanelActors" class="side-panel-view">
+            <div id="sidePanelActors" class="side-panel-view" style="display:none;">
                 <div id="actorTreeBody" class="actor-tree-body"></div>
                 <div id="actorDataPanel" class="actor-data-panel" style="display:none;">
                     <div class="actor-data-header">
@@ -75,17 +69,12 @@
             <div id="sidePanelPlugins" class="side-panel-view" style="display:none;">
                 <div id="pluginsBody" class="actor-tree-body"></div>
             </div>
-            <div id="sidePanelRun" class="side-panel-view side-panel-run" style="display:none;">
+            <div id="sidePanelRun" class="side-panel-view side-panel-run" style="display:flex;">
                 <div class="run-panel-controls">
                     <button id="paramExecute" class="btn btn-run">&#9654; Start</button>
-                    <button id="createBatchJobBtn" class="btn btn-batch">&#43; Batch Job</button>
                     <button id="stopBtn" class="btn btn-stop" disabled>&#9632; Stop</button>
                     <button id="resumeBtn" class="btn btn-resume" style="display:none">Resume</button>
-                </div>
-                <div id="batchJobResult" class="batch-job-result" style="display:none;">
-                    <span class="batch-job-label">Job ID:</span>
-                    <span id="batchJobId" class="batch-job-id"></span>
-                    <button id="batchJobCopy" class="btn btn-small">Copy</button>
+                    <button id="copyCliBtn" class="btn btn-small">Copy CLI</button>
                 </div>
                 <div class="run-panel-body">
                     <div class="param-section">
@@ -108,7 +97,9 @@
                     </div>
                     <div id="paramNoParams" class="param-no-params" style="display:none;">No parameters required.</div>
                 </div>
-                <div id="queueArea" class="queue-area">
+            </div>
+            <div id="sidePanelQueue" class="side-panel-view" style="display:none;">
+                <div id="queueArea" class="queue-area" style="flex:1;">
                     <div class="queue-header">
                         <span>Queue</span>
                         <span id="queueCount" class="queue-count"></span>
@@ -117,7 +108,7 @@
                 </div>
             </div>
         </section>
-        <div id="sidePanelResizer" class="tree-resizer" style="display:none;"></div>
+        <div id="sidePanelResizer" class="tree-resizer" style="display:block;"></div>
         <div class="editor-and-log">
             <section class="editor-section">
                 <div class="tab-bar">
@@ -158,7 +149,7 @@
 
     <!-- Catalog modal -->
     <div id="catalogOverlay" class="modal-overlay" style="display:none;">
-        <div class="modal-box" style="width:780px;height:80vh;display:flex;flex-direction:column;gap:12px;">
+        <div class="modal-box" style="width:1100px;height:88vh;display:flex;flex-direction:column;gap:12px;">
             <div class="modal-header">
                 <span class="modal-title">Workflow Catalog</span>
                 <button id="catalogCloseBtn" class="modal-close-btn">&times;</button>

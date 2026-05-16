@@ -15,7 +15,11 @@ import java.util.*;
 @ApplicationScoped
 public class CatalogIndexService {
 
-    public record Entry(String filename, String path, String name, String description) {}
+    public record Entry(String filename, String path, String name, String description, String tags) {
+        public Entry(String filename, String path, String name, String description) {
+            this(filename, path, name, description, "");
+        }
+    }
 
     public record SearchResult(long total, int page, int size, List<Entry> results) {}
 
@@ -30,9 +34,10 @@ public class CatalogIndexService {
             for (var e : entries) {
                 var doc = new Document();
                 doc.add(new StringField("filename", e.filename(), Field.Store.YES));
-                doc.add(new StoredField("path", e.path()));
+                doc.add(new StoredField("path", e.path() != null ? e.path() : ""));
                 doc.add(new TextField("name", e.name(), Field.Store.YES));
                 doc.add(new TextField("description", e.description(), Field.Store.YES));
+                doc.add(new TextField("tags", e.tags() != null ? e.tags() : "", Field.Store.YES));
                 doc.add(new SortedDocValuesField("filename_sort",
                         new org.apache.lucene.util.BytesRef(e.filename().toLowerCase())));
                 writer.addDocument(doc);
@@ -51,7 +56,7 @@ public class CatalogIndexService {
                     Integer.MAX_VALUE, new Sort(new SortField("filename_sort", SortField.Type.STRING)));
         } else {
             var parser = new MultiFieldQueryParser(
-                    new String[]{"filename", "name", "description"}, analyzer);
+                    new String[]{"filename", "name", "description", "tags"}, analyzer);
             var q = parser.parse(MultiFieldQueryParser.escape(query.trim()) + "*");
             hits = searcher.search(q, Integer.MAX_VALUE,
                     new Sort(new SortField("filename_sort", SortField.Type.STRING)));
@@ -66,7 +71,8 @@ public class CatalogIndexService {
                     doc.get("filename"),
                     doc.get("path"),
                     doc.get("name"),
-                    doc.get("description")));
+                    doc.get("description"),
+                    doc.get("tags")));
         }
         return new SearchResult(total, page, size, results);
     }

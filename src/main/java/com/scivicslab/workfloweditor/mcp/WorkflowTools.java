@@ -2,8 +2,6 @@ package com.scivicslab.workfloweditor.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scivicslab.pojoactor.core.ActionResult;
-import com.scivicslab.workfloweditor.batch.BatchJob;
-import com.scivicslab.workfloweditor.batch.BatchJobService;
 import com.scivicslab.workfloweditor.rest.WorkflowResource;
 import com.scivicslab.workfloweditor.service.WorkflowRunner;
 import com.scivicslab.workfloweditor.service.WorkflowState;
@@ -41,9 +39,6 @@ public class WorkflowTools {
 
     @ConfigProperty(name = "workflow.dir", defaultValue = "/home/devteam/works/workflow")
     String workflowDir;
-
-    @Inject
-    BatchJobService batchJobService;
 
     @Inject
     ObjectMapper objectMapper;
@@ -226,56 +221,6 @@ public class WorkflowTools {
         } catch (IOException e) {
             return "Error loading workflow '" + name + "': " + e.getMessage();
         }
-    }
-
-    @Tool(description = "Register the current workflow and parameters as a batch job. "
-            + "Returns a jobId. Use runBatchJob(jobId) to execute it later.")
-    String createBatchJob(
-            @ToolArg(description = "Full YAML workflow content") String yaml,
-            @ToolArg(description = "Parameters as JSON object e.g. {\"key\":\"value\"}") String parametersJson
-    ) {
-        Map<String, String> params = parseParamsJson(parametersJson);
-        BatchJob job = batchJobService.create(state.getName(), yaml, params);
-        return "jobId: " + job.id + "\nstatus: " + job.status + "\ncreatedAt: " + job.createdAt;
-    }
-
-    @Tool(description = "Run a registered batch job by its ID via Turing Workflow CLI. "
-            + "Execution is asynchronous — use getBatchJobStatus to poll for completion.")
-    String runBatchJob(
-            @ToolArg(description = "Job ID returned by createBatchJob") String jobId
-    ) {
-        String result = batchJobService.startJob(jobId);
-        if (result.startsWith("error:")) return "Error: " + result.substring(7).trim();
-        return "Job " + jobId + " started (RUNNING). Use getBatchJobStatus to check progress.";
-    }
-
-    @Tool(description = "Get the status and log output of a batch job.")
-    String getBatchJobStatus(
-            @ToolArg(description = "Job ID returned by createBatchJob") String jobId
-    ) {
-        BatchJob job = batchJobService.findById(jobId);
-        if (job == null) return "Error: Job not found: " + jobId;
-        StringBuilder sb = new StringBuilder();
-        sb.append("jobId: ").append(job.id).append("\n");
-        sb.append("name: ").append(job.name).append("\n");
-        sb.append("status: ").append(job.status).append("\n");
-        if (job.startedAt != null) sb.append("startedAt: ").append(job.startedAt).append("\n");
-        if (job.finishedAt != null) sb.append("finishedAt: ").append(job.finishedAt).append("\n");
-        if (job.exitCode != null) sb.append("exitCode: ").append(job.exitCode).append("\n");
-        if (job.log != null && !job.log.isBlank()) sb.append("log:\n").append(job.log);
-        return sb.toString();
-    }
-
-    @Tool(description = "List recent batch jobs (latest 20), showing ID, name, status, and creation time.")
-    String listBatchJobs() {
-        List<BatchJob> jobs = batchJobService.listRecent();
-        if (jobs.isEmpty()) return "No batch jobs found.";
-        StringBuilder sb = new StringBuilder();
-        for (BatchJob job : jobs) {
-            sb.append(job.id).append(" [").append(job.status).append("] ")
-              .append(job.name).append(" (").append(job.createdAt).append(")\n");
-        }
-        return sb.toString();
     }
 
     @SuppressWarnings("unchecked")

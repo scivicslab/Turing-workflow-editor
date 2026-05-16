@@ -3,7 +3,6 @@
 
     var stepsContainer = document.getElementById('stepsContainer');
     var descriptionArea = document.getElementById('workflowDescription');
-    var runBtn = document.getElementById('runBtn');
     var stopBtn = document.getElementById('stopBtn');
     var resumeBtn = document.getElementById('resumeBtn');
     var paramExecute = document.getElementById('paramExecute');
@@ -920,7 +919,6 @@
         paramFilePreview.value = '';
         paramFileUnload.style.display = 'none';
         paramFileInput.value = '';
-        document.getElementById('batchJobResult').style.display = 'none';
 
         fetch('/api/params/meta').then(function (r) { return r.json(); }).catch(function () { return {}; })
             .then(function (meta) {
@@ -1017,46 +1015,78 @@
           .catch(function (err) { appendLog('error', 'Failed to start: ' + err.message); setRunning(false); });
     });
 
-    runBtn.addEventListener('click', function () {
-        if (getSteps().length === 0) { appendLog('error', 'No valid steps to run'); return; }
-        openParamDialog();
-    });
 
-    var createBatchJobBtn = document.getElementById('createBatchJobBtn');
-    var batchJobResult = document.getElementById('batchJobResult');
-    var batchJobIdSpan = document.getElementById('batchJobId');
-    var batchJobCopy = document.getElementById('batchJobCopy');
+    // --- Copy CLI button ---
 
-    createBatchJobBtn.addEventListener('click', function () {
-        var parameters = Object.assign({}, _paramLoadedVars);
-        var paramRequiredList = document.getElementById('paramRequiredList');
-        paramRequiredList.querySelectorAll('[data-param-key]').forEach(function (input) {
-            if (input.value.trim()) parameters[input.dataset.paramKey] = input.value.trim();
+    var copyCliBtn = document.getElementById('copyCliBtn');
+    var _cliJarPath = '';
+    var _cliWorkflowDir = '';
+    var _cliTooltipEl = null;
+
+    fetch('/api/system/cli-info').then(function (r) { return r.json(); }).then(function (info) {
+        _cliJarPath = info.jarPath || 'turing-workflow.jar';
+        _cliWorkflowDir = info.workflowDir || '';
+    }).catch(function () {});
+
+    function buildCliCommand(filePath) {
+        var jar = _cliJarPath || 'turing-workflow.jar';
+        var wPath = filePath || (_cliWorkflowDir ? _cliWorkflowDir + '/' + (activeTabName || 'workflow') + '.yaml' : '<workflow.yaml>');
+        var maxIter = maxIterationsInput.value || '100';
+        var params = Object.assign({}, _paramLoadedVars);
+        document.getElementById('paramRequiredList').querySelectorAll('[data-param-key]').forEach(function (input) {
+            if (input.value.trim()) params[input.dataset.paramKey] = input.value.trim();
         });
+        var lines = ['java -jar ' + jar + ' run \\', '  -w ' + wPath + ' \\', '  -m ' + maxIter];
+        Object.keys(params).forEach(function (k) {
+            lines[lines.length - 1] += ' \\';
+            lines.push('  -P ' + k + '=' + params[k]);
+        });
+        return lines.join('\n');
+    }
 
-        fetch('/api/batch/jobs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parameters: parameters })
-        }).then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (data.jobId) {
-                batchJobIdSpan.textContent = data.jobId;
-                batchJobResult.style.display = 'flex';
-                appendLog('info', 'Batch job created: ' + data.jobId);
-            } else {
-                appendLog('error', 'Failed to create batch job: ' + (data.error || 'unknown'));
+    function showCliTooltip(e) {
+        fetch('/api/system/cli-info').then(function (r) { return r.json(); }).then(function (info) {
+            var cmd = buildCliCommand(info.filePath || '');
+            if (!_cliTooltipEl) {
+                _cliTooltipEl = document.createElement('div');
+                _cliTooltipEl.className = 'cli-tooltip-box';
+                document.body.appendChild(_cliTooltipEl);
             }
-        }).catch(function (err) {
-            appendLog('error', 'Failed to create batch job: ' + err.message);
-        });
-    });
+            _cliTooltipEl.textContent = cmd;
+            _cliTooltipEl.style.display = 'block';
+            positionCliTooltip();
+        }).catch(function () {});
+    }
 
-    batchJobCopy.addEventListener('click', function () {
-        navigator.clipboard.writeText(batchJobIdSpan.textContent).then(function () {
-            var orig = batchJobCopy.textContent;
-            batchJobCopy.textContent = 'Copied!';
-            setTimeout(function () { batchJobCopy.textContent = orig; }, 2000);
+    function positionCliTooltip() {
+        if (!_cliTooltipEl) return;
+        var rect = copyCliBtn.getBoundingClientRect();
+        var tipH = _cliTooltipEl.offsetHeight;
+        var top = rect.top - tipH - 8;
+        if (top < 4) top = rect.bottom + 8;
+        var left = Math.max(4, Math.min(rect.left, window.innerWidth - _cliTooltipEl.offsetWidth - 4));
+        _cliTooltipEl.style.top = top + 'px';
+        _cliTooltipEl.style.left = left + 'px';
+    }
+
+    function hideCliTooltip() {
+        if (_cliTooltipEl) _cliTooltipEl.style.display = 'none';
+    }
+
+    copyCliBtn.addEventListener('mouseenter', showCliTooltip);
+    copyCliBtn.addEventListener('mouseleave', hideCliTooltip);
+
+    copyCliBtn.addEventListener('click', function () {
+        fetch('/api/system/cli-info').then(function (r) { return r.json(); }).then(function (info) {
+            var cmd = buildCliCommand(info.filePath || '');
+            navigator.clipboard.writeText(cmd).then(function () {
+                var orig = copyCliBtn.textContent;
+                copyCliBtn.textContent = 'Copied!';
+                hideCliTooltip();
+                setTimeout(function () { copyCliBtn.textContent = orig; }, 1500);
+            });
+        }).catch(function (err) {
+            appendLog('error', 'Copy CLI failed: ' + err.message);
         });
     });
 
@@ -1104,10 +1134,7 @@
     var catalogPageSize = 10;
     var catalogCurrentQuery = '';
 
-    document.getElementById('openCatalogBtn').addEventListener('click', function () {
-        document.getElementById('fileMenu').style.display = 'none';
-        openCatalog();
-    });
+
 
     catalogCloseBtn.addEventListener('click', function () {
         catalogOverlay.style.display = 'none';
@@ -1280,7 +1307,7 @@
               }).then(function (r) { return r.json(); })
                 .then(function (entries) {
                     return entries.map(function (e) {
-                        return {filename: e.file || e.filename || '', path: e.path || '', name: e.name || '', description: e.description || ''};
+                        return {filename: e.file || e.filename || '', path: e.path || '', name: e.name || '', description: e.description || '', tags: e.tags || ''};
                     });
                 })
             : Promise.resolve([]);
@@ -1370,6 +1397,23 @@
             })(entry));
             tdWorkflow.appendChild(nameDiv);
             tdWorkflow.appendChild(fileDiv);
+            if (entry.tags) {
+                var tagsDiv = document.createElement('div');
+                tagsDiv.style.cssText = 'margin-top:4px;display:flex;flex-wrap:wrap;gap:3px;';
+                entry.tags.split(/\s+/).filter(Boolean).forEach(function (tag) {
+                    var chip = document.createElement('span');
+                    chip.className = 'catalog-tag-chip';
+                    chip.textContent = tag;
+                    chip.addEventListener('click', function () {
+                        catalogSearch.value = tag;
+                        catalogCurrentQuery = tag;
+                        catalogCurrentPage = 0;
+                        loadCatalogPage();
+                    });
+                    tagsDiv.appendChild(chip);
+                });
+                tdWorkflow.appendChild(tagsDiv);
+            }
             tdWorkflow.appendChild(btn);
             tr.appendChild(tdWorkflow);
 
@@ -1413,6 +1457,7 @@
 
     function importFromCatalogEntry(entry) {
         var targetPath = entry.path;
+        appendLog('info', 'Importing: ' + targetPath);
         if (!targetPath) { appendLog('error', 'No path for catalog entry'); return; }
 
         fetch('/api/catalog/file?path=' + encodeURIComponent(targetPath))
@@ -1421,6 +1466,10 @@
                 return r.text();
             })
             .then(function (yaml) {
+                if (!yaml || yaml.trim().length === 0) {
+                    appendLog('error', 'Empty YAML returned for: ' + targetPath);
+                    return;
+                }
                 parseAndLoadYaml(yaml);
                 appendLog('info', 'Imported from catalog: ' + entry.name);
                 catalogOverlay.style.display = 'none';
@@ -1763,14 +1812,10 @@
         menu.addEventListener('click', function () { menu.style.display = 'none'; });
     }
     setupMenu('fileMenuBtn', 'fileMenu');
-    setupMenu('sidebarMenuBtn', 'sidebarMenu');
     document.addEventListener('click', function () {
         document.querySelectorAll('.header-menu').forEach(function (m) { m.style.display = 'none'; });
     });
 
-    var treeBtn = document.getElementById('treeBtn');
-    var pluginsBtn = document.getElementById('pluginsBtn');
-    var workflowsBtn = document.getElementById('workflowsBtn');
     var sidePanel = document.getElementById('sidePanel');
     var sidePanelClose = document.getElementById('sidePanelClose');
     var sidePanelRefresh = document.getElementById('sidePanelRefresh');
@@ -1785,8 +1830,14 @@
     var actorTreeData = [];
     var treeCollapsed = {};
 
-    var activeSideTab = 'actors';
+    var activeSideTab = 'run';
     var sideTabs = document.querySelectorAll('.side-tab');
+
+    // Show Run tab on startup
+    document.getElementById('sidePanelActors').style.display = 'none';
+    document.getElementById('sidePanelPlugins').style.display = 'none';
+    document.getElementById('sidePanelRun').style.display = 'flex';
+    document.getElementById('sidePanelQueue').style.display = 'none';
 
     function showSidePanel(tab) {
         var wasHidden = sidePanel.style.display === 'none';
@@ -1813,6 +1864,7 @@
         document.getElementById('sidePanelActors').style.display = tab === 'actors' ? 'flex' : 'none';
         document.getElementById('sidePanelPlugins').style.display = tab === 'plugins' ? 'flex' : 'none';
         document.getElementById('sidePanelRun').style.display = tab === 'run' ? 'flex' : 'none';
+        document.getElementById('sidePanelQueue').style.display = tab === 'queue' ? 'flex' : 'none';
 
         // Fetch data and manage polling
         if (tab === 'actors') {
@@ -1824,11 +1876,6 @@
         }
     }
 
-    treeBtn.addEventListener('click', function () { showSidePanel('actors'); });
-    pluginsBtn.addEventListener('click', function () { showSidePanel('plugins'); });
-    workflowsBtn.addEventListener('click', function () {
-        openParamDialog(getSteps());
-    });
     sidePanelClose.addEventListener('click', function () {
         sidePanel.style.display = 'none';
         sidePanelResizer.style.display = 'none';

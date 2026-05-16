@@ -478,6 +478,35 @@ public class WorkflowApiResource {
         return Map.of("cwd", System.getProperty("user.dir"));
     }
 
+    @GET
+    @Path("/system/cli-info")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, String> getCliInfo() {
+        String jarPath = findTuringWorkflowJar();
+        String filePath = state.getFilePath() != null ? state.getFilePath() : "";
+        String workflowDir = System.getProperty("user.home") + "/works/workflow";
+        return Map.of("jarPath", jarPath, "filePath", filePath, "workflowDir", workflowDir);
+    }
+
+    private String findTuringWorkflowJar() {
+        var m2 = java.nio.file.Path.of(System.getProperty("user.home"), ".m2", "repository",
+                "com", "scivicslab", "turing-workflow");
+        try (var stream = java.nio.file.Files.walk(m2, 2)) {
+            return stream
+                    .filter(p -> {
+                        String n = p.getFileName().toString();
+                        return n.startsWith("turing-workflow-") && n.endsWith(".jar")
+                                && !n.contains("sources") && !n.contains("javadoc");
+                    })
+                    .sorted(java.util.Comparator.reverseOrder())
+                    .map(java.nio.file.Path::toString)
+                    .findFirst()
+                    .orElse("turing-workflow.jar");
+        } catch (Exception e) {
+            return "turing-workflow.jar";
+        }
+    }
+
     @PUT
     @Path("/catalog/dirs")
     @Consumes(MediaType.APPLICATION_JSON)
@@ -497,6 +526,7 @@ public class WorkflowApiResource {
         public String path;
         public String name;
         public String description;
+        public String tags;
         public String content; // raw YAML (optional — for client-side scanned files)
     }
 
@@ -519,7 +549,8 @@ public class WorkflowApiResource {
                             if (parsed != null) {
                                 return new com.scivicslab.workfloweditor.service.CatalogIndexService.Entry(
                                         parsed.get("file"), parsed.get("path"),
-                                        parsed.get("name"), parsed.get("description"));
+                                        parsed.get("name"), parsed.get("description"),
+                                        parsed.get("tags"));
                             }
                             return null; // not a workflow YAML
                         }
@@ -527,7 +558,8 @@ public class WorkflowApiResource {
                                 e.filename != null ? e.filename : "",
                                 e.path != null ? e.path : "",
                                 e.name != null ? e.name : "",
-                                e.description != null ? e.description : "");
+                                e.description != null ? e.description : "",
+                                e.tags != null ? e.tags : "");
                     })
                     .filter(e -> e != null)
                     .toList();
